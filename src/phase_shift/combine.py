@@ -29,7 +29,7 @@ class CombinedResult:
         agreement across acquisitions). ``scatter`` is a monotonic function
         of this; kept separately since ``R`` is also directly useful as a
         reliability weight (e.g. as ``weight=`` to
-        :func:`~phase_shift.carrier.remove_carrier`).
+        :func:`~phase.carrier.remove_carrier`).
     n : int
         Number of acquisitions combined.
     sign_flips : list of int
@@ -54,8 +54,8 @@ def combine_acquisitions(phis, weights=None, align_carrier: bool = True,
     not average out within one run, only across independent runs -- unlike
     per-frame model errors (contrast, phase-step), which are systematic
     within a run and need a better model rather than averaging (see
-    :class:`phase_shift.solver.PhaseConfig`'s ``gain_mode`` and
-    :func:`phase_shift.utils.measure_frame_contrast`). Averaging ``k`` independent
+    :class:`phase.solver.PhaseConfig`'s ``gain_mode`` and
+    :func:`phase.utils.measure_frame_contrast`). Averaging ``k`` independent
     acquisitions brings this random component down as the expected
     ``1/sqrt(k)``.
 
@@ -64,7 +64,7 @@ def combine_acquisitions(phis, weights=None, align_carrier: bool = True,
     package:
 
     1. **Sign branch** -- each phase-recovery run independently lands on
-       ``+phi`` or ``-phi`` (see :func:`~phase_shift.reference.subtract_reference`).
+       ``+phi`` or ``-phi`` (see :func:`~phase.reference.subtract_reference`).
        Every map is resolved against ``phis[reference]`` the same way
        ``subtract_reference`` does, and flipped if that gives lower spread;
        see ``sign_flips``. This is done on the *raw* input maps, before
@@ -78,7 +78,7 @@ def combine_acquisitions(phis, weights=None, align_carrier: bool = True,
     2. **Inter-acquisition drift** -- tilt/piston (and, if ``align_carrier``
        includes ``defocus``, curvature) generally differ slightly between
        acquisitions of the same nominal setup. Each sign-resolved map is
-       then passed through :func:`~phase_shift.carrier.remove_carrier` so the
+       then passed through :func:`~phase.carrier.remove_carrier` so the
        average isn't blurred by chasing a moving carrier.
     3. **Circular averaging** -- phase is combined as the complex mean
        ``mean(weight * exp(i*phi))``, never an arithmetic mean of the
@@ -88,17 +88,17 @@ def combine_acquisitions(phis, weights=None, align_carrier: bool = True,
     ----------
     phis : sequence of np.ndarray, each shape (H, W)
         Independently recovered phase maps of the *same* object (e.g. one
-        per repeated scan). Pass :attr:`phase_shift.solver.PhaseResult.phi` from
-        separate :meth:`~phase_shift.solver.PhaseSolver.fit` calls -- fit one
+        per repeated scan). Pass :attr:`phase.solver.PhaseResult.phi` from
+        separate :meth:`~phase.solver.PhaseSolver.fit` calls -- fit one
         stack at a time and keep only ``phi``/``b``, rather than holding
         every raw stack in memory at once.
     weights : sequence of np.ndarray, each shape (H, W), optional
         Per-acquisition, per-pixel reliability (e.g. each acquisition's
-        :attr:`phase_shift.solver.PhaseResult.b`). Used both for the
+        :attr:`phase.solver.PhaseResult.b`). Used both for the
         carrier-removal step and the final weighted circular mean. Defaults
         to uniform weight.
     align_carrier : bool, default True
-        Run :func:`~phase_shift.carrier.remove_carrier` (with ``defocus=True``)
+        Run :func:`~phase.carrier.remove_carrier` (with ``defocus=True``)
         on each map before combining. Turn off only if the maps are
         already known to share one carrier (e.g. already differenced
         against a reference).
@@ -107,11 +107,11 @@ def combine_acquisitions(phis, weights=None, align_carrier: bool = True,
         is oriented to agree with this one.
     carrier_kwargs : dict, optional
         Extra keyword arguments forwarded to the internal
-        :func:`~phase_shift.carrier.remove_carrier` calls (defaults to
+        :func:`~phase.carrier.remove_carrier` calls (defaults to
         ``defocus=True, refine_iters=10, n_blocks=10``, matching
         ``remove_carrier``'s own defaults).
     device : {"auto", "cpu", "cuda"}, default "auto"
-        Where to run -- see :func:`phase_shift.backend.to_device` for the full
+        Where to run -- see :func:`phase.backend.to_device` for the full
         explanation. Every array in ``phis``/``weights`` is uploaded if
         needed (they should already share one device -- e.g. all recovered
         by ``PhaseSolver(config, device="cuda")`` calls -- to avoid a

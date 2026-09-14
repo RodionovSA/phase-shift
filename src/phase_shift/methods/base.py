@@ -1,10 +1,10 @@
 """Shared base type for per-method diagnostics.
 
-Kept separate from :mod:`phase_shift.solver` so the dependency between the two
-packages stays one-directional: ``phase_shift.solver`` imports from
-``phase_shift.methods``, never the reverse -- a method module (e.g.
-:mod:`phase_shift.methods.aia`) importing :class:`MethodParam` from here instead
-of from ``phase_shift.solver`` avoids a circular import.
+Kept separate from :mod:`phase.solver` so the dependency between the two
+packages stays one-directional: ``phase.solver`` imports from
+``phase.methods``, never the reverse -- a method module (e.g.
+:mod:`phase.methods.aia`) importing :class:`MethodParam` from here instead
+of from ``phase.solver`` avoids a circular import.
 """
 
 from dataclasses import dataclass, fields
@@ -19,11 +19,11 @@ def _fmt_value(value) -> str:
 class MethodParam:
     """Base marker type for a method's per-fit diagnostics.
 
-    Each entry in :data:`phase_shift.solver.METHODS` returns its own subclass
-    (e.g. ``aia`` returns :class:`phase_shift.methods.aia.AIAParam`) carrying
+    Each entry in :data:`phase.solver.METHODS` returns its own subclass
+    (e.g. ``aia`` returns :class:`phase.methods.aia.AIAParam`) carrying
     whatever diagnostics are specific to that algorithm (convergence,
     condition numbers, ...). Stored on
-    :attr:`phase_shift.solver.PhaseResult.method_param`.
+    :attr:`phase.solver.PhaseResult.method_param`.
     """
 
     def print_summary(self) -> None:
@@ -31,7 +31,7 @@ class MethodParam:
 
         Generic default, in dataclass declaration order -- a method
         overrides this for a specific order or subset (e.g.
-        :meth:`phase_shift.methods.aia.AIAParam.print_summary`).
+        :meth:`phase.methods.aia.AIAParam.print_summary`).
         """
         for f in fields(self):
             print(f"{f.name}: {_fmt_value(getattr(self, f.name))}")
@@ -42,11 +42,11 @@ class MethodParam:
         Default: ``delta`` is spatially uniform (the piston model), so this
         just broadcasts it to ``(N, H, W)``. A method whose recovered phase
         step varies spatially (e.g. a per-frame tilt) overrides this --
-        :meth:`phase_shift.solver.PhaseSolver.fit`'s method-agnostic
+        :meth:`phase.solver.PhaseSolver.fit`'s method-agnostic
         reconstruction-error check calls this instead of assuming ``delta``
         broadcasts directly, so a new method needs only override this to be
         handled there (see
-        :class:`phase_shift.methods.step_field.StepFieldParam`).
+        :class:`phase.methods.step_field.StepFieldParam`).
 
         Parameters
         ----------

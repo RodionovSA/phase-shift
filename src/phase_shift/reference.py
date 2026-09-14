@@ -50,7 +50,7 @@ def subtract_reference(phi: np.ndarray, phi_ref: np.ndarray,
     setup, so that subtracting it from a sample measurement's phase
     cancels that shared aberration and leaves only the sample-induced
     phase. This only works if ``phi`` and ``phi_ref`` share a common sign
-    convention -- and a phase-shifting solve (see :mod:`phase_shift.solver`)
+    convention -- and a phase-shifting solve (see :mod:`phase.solver`)
     cannot guarantee that on its own.
 
     Why not: the phase-shifting model ``I_n = a + b*cos(phi + delta_n)``
@@ -76,7 +76,7 @@ def subtract_reference(phi: np.ndarray, phi_ref: np.ndarray,
     Parameters
     ----------
     phi : np.ndarray, shape (H, W)
-        Sample phase map, in ``(-pi, pi]`` (e.g. :attr:`phase_shift.solver.PhaseResult.phi`).
+        Sample phase map, in ``(-pi, pi]`` (e.g. :attr:`phase.solver.PhaseResult.phi`).
     phi_ref : np.ndarray, shape (H, W)
         Reference phase map, same shape as ``phi``.
     weight : np.ndarray, shape (H, W), optional
@@ -95,7 +95,7 @@ def subtract_reference(phi: np.ndarray, phi_ref: np.ndarray,
         or the two measurements didn't actually share much of a common
         aberration to cancel.
     device : {"auto", "cpu", "cuda"}, default "auto"
-        Where to run -- see :func:`phase_shift.backend.to_device` for the full
+        Where to run -- see :func:`phase.backend.to_device` for the full
         explanation. ``phi``/``phi_ref``/``weight``/``mask`` are uploaded if
         needed; the result's ``phi`` field stays on that device rather than
         being downloaded automatically.
@@ -110,7 +110,7 @@ def subtract_reference(phi: np.ndarray, phi_ref: np.ndarray,
     This resolves the sign ambiguity, not general drift between the two
     measurements. If the setup moved between the sample and reference
     shots, some residual tilt/curvature can remain in ``phi`` even after
-    picking the right branch -- :func:`~phase_shift.carrier.remove_carrier` can
+    picking the right branch -- :func:`~phase.carrier.remove_carrier` can
     clean that up as a separate step, run on the *difference* map, not on
     ``phi``/``phi_ref`` individually beforehand.
     """

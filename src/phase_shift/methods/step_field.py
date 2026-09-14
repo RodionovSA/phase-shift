@@ -1,6 +1,6 @@
 """AIA with iterative, arbitrary-degree step-field refinement.
 
-Builds on :mod:`phase_shift.methods.aia`: :func:`fit_step_field` and
+Builds on :mod:`phase.methods.aia`: :func:`fit_step_field` and
 :func:`step_field_quality` are the per-frame step-field-coefficient
 regression and its quality check derived in
 ``docs/step_field_residuals.md`` (its §8, Eqs. E1-E4); :func:`aia_step_field`
@@ -77,7 +77,7 @@ def _poly_basis(H: int, W: int, degree: int, xp):
 def _cond_batch(M, xp):
     """2-norm condition number of a batch of square matrices, shape ``(..., k)``.
 
-    Batched analogue of :func:`phase_shift.methods.aia._cond3`; a singular batch
+    Batched analogue of :func:`phase.methods.aia._cond3`; a singular batch
     element reports ``inf`` rather than dividing by zero.
     """
     s = xp.linalg.svd(M, compute_uv=False)
@@ -101,7 +101,7 @@ def fit_step_field(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.ndarra
 
     ``G^(n)`` is built from the basis's pairwise products in pixel chunks,
     rather than materializing the full pair-product array at once -- the
-    same idiom :func:`phase_shift.methods.aia._chunked_sigma` uses, for the same
+    same idiom :func:`phase.methods.aia._chunked_sigma` uses, for the same
     reason.
 
     Parameters
@@ -223,7 +223,7 @@ def step_field_quality(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.nd
         Pixels excluded from each edge of the field before computing either
         RMS. ``crop=0`` compares over the full field.
     precise_reduce : bool, default True
-        See :attr:`phase_shift.solver.PhaseConfig.precise_reduce`. Controls the
+        See :attr:`phase.solver.PhaseConfig.precise_reduce`. Controls the
         dtype of every operand feeding the ``(N, P)`` reconstruction below,
         and hence of the returned ``resid`` itself.
 
@@ -302,7 +302,7 @@ class StepFieldParam(MethodParam):
         ``kappa_p``, ``kappa_ps``, ``predicted_rms`` recomputed against the
         *final*, step-field-refined ``(a, u, v, delta)``. ``iters_run``/
         ``converged`` instead describe the initial
-        :func:`phase_shift.methods.aia.aia` call's own loop -- the outer
+        :func:`phase.methods.aia.aia` call's own loop -- the outer
         refinement loop has its own ``refine_iters_run``/``refine_converged``
         below.
     degree : int
@@ -339,9 +339,9 @@ class StepFieldParam(MethodParam):
         taken from -- not necessarily the last one run. ``-1`` if
         ``refine_iters=0``.
     precise_reduce : bool
-        See :attr:`phase_shift.solver.PhaseConfig.precise_reduce`. Carried here
+        See :attr:`phase.solver.PhaseConfig.precise_reduce`. Carried here
         (not just as a call argument) so :meth:`phase_step_field`, called
-        generically by :meth:`phase_shift.solver.PhaseSolver.fit`, can honor it.
+        generically by :meth:`phase.solver.PhaseSolver.fit`, can honor it.
     work_dtype
         The working dtype ``aia_step_field`` actually solved in -- what
         :meth:`phase_step_field` casts down to when ``precise_reduce`` is
@@ -375,8 +375,8 @@ class StepFieldParam(MethodParam):
     def phase_step_field(self, delta, H, W, xp):
         """Piston ``delta_n`` plus the fitted per-frame step field ``coeffs[:,n] @ basis``.
 
-        Overrides :meth:`phase_shift.methods.base.MethodParam.phase_step_field`'s
-        plain broadcast so :meth:`phase_shift.solver.PhaseSolver.fit`'s
+        Overrides :meth:`phase.methods.base.MethodParam.phase_step_field`'s
+        plain broadcast so :meth:`phase.solver.PhaseSolver.fit`'s
         reconstruction check sees the spatially-varying phase step this
         method recovers. Honors ``self.precise_reduce`` exactly as
         :func:`step_field_quality` does (float64 vs. ``self.work_dtype``).
@@ -396,7 +396,7 @@ def aia_step_field(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
                     crop: int = 100, precise_reduce: bool = True):
     """Advanced Iterative Algorithm with iterative, arbitrary-degree step-field refinement.
 
-    Runs the piston-only :func:`phase_shift.methods.aia.aia` to convergence, then
+    Runs the piston-only :func:`phase.methods.aia.aia` to convergence, then
     alternates fitting the per-frame step-field residual
     (:func:`fit_step_field`), scoring it (:func:`step_field_quality`), and
     removing its estimated contribution from the *original* stack before
@@ -415,15 +415,15 @@ def aia_step_field(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
     Parameters
     ----------
     stack : np.ndarray, shape (N, H, W)
-        Phase-shifted interferogram frames -- see :func:`phase_shift.methods.aia.aia`.
+        Phase-shifted interferogram frames -- see :func:`phase.methods.aia.aia`.
     g : np.ndarray, shape (N,)
-        Per-frame fringe contrast -- see :func:`phase_shift.methods.aia.aia`.
+        Per-frame fringe contrast -- see :func:`phase.methods.aia.aia`.
     fit_gain : bool, default False
         If True, recover ``g`` jointly rather than holding it fixed --
-        forwarded to the initial :func:`phase_shift.methods.aia.aia` call and
+        forwarded to the initial :func:`phase.methods.aia.aia` call and
         kept fitted (re-estimated each refinement round) throughout.
     delta0, iters, tol, dtype
-        Passed through to the initial :func:`phase_shift.methods.aia.aia` call.
+        Passed through to the initial :func:`phase.methods.aia.aia` call.
     degree : int, default 1
         Highest total polynomial degree to fit the step field to (see
         :func:`_poly_basis`); ``0`` disables the step-field correction
@@ -443,14 +443,14 @@ def aia_step_field(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
         Pixels excluded from each edge of the field when computing
         ``rms_frac`` (see :func:`step_field_quality`).
     precise_reduce : bool, default True
-        See :attr:`phase_shift.solver.PhaseConfig.precise_reduce`. Forwarded to
+        See :attr:`phase.solver.PhaseConfig.precise_reduce`. Forwarded to
         the initial ``aia`` call and to every ``aia_frame_step``/
         ``step_field_quality`` call in the refinement loop below.
 
     Returns
     -------
     a, b, phi, delta, g, method_param
-        Same contract as :func:`phase_shift.methods.aia.aia`; ``method_param`` is
+        Same contract as :func:`phase.methods.aia.aia`; ``method_param`` is
         a :class:`StepFieldParam`.
     """
     if degree < 0:

@@ -1,4 +1,4 @@
-"""Array-module dispatch (NumPy/CuPy) shared across :mod:`phase_shift`.
+"""Array-module dispatch (NumPy/CuPy) shared across :mod:`phase`.
 
 Every function in this package is written against ``xp = get_array_module(...)``
 and calls ``xp.`` throughout, so it runs unchanged on NumPy (CPU, always
@@ -43,8 +43,8 @@ def to_device(x, device: str = "auto", dtype=None):
     """Move array-like ``x`` onto the requested device, returning an ndarray.
 
     Only meant for host->device staging at a public entry point (e.g.
-    :meth:`phase_shift.solver.PhaseSolver.fit`, :func:`phase_shift.carrier.remove_carrier`,
-    :func:`phase_shift.combine.combine_acquisitions`) -- everything else should
+    :meth:`phase.solver.PhaseSolver.fit`, :func:`phase.carrier.remove_carrier`,
+    :func:`phase.combine.combine_acquisitions`) -- everything else should
     just call :func:`get_array_module` on whatever array it's handed rather
     than moving data around mid-pipeline.
 
@@ -138,7 +138,7 @@ if CUPY_AVAILABLE:
         Plain :func:`wrap` already fuses fine under cupy's default kernel
         fusion for typical expressions, but this ``ElementwiseKernel`` avoids
         relying on that and is the one used inside hot loops (e.g.
-        :mod:`phase_shift.carrier`'s tilt refine) where every kernel launch counts.
+        :mod:`phase.carrier`'s tilt refine) where every kernel launch counts.
         Falls back to :func:`wrap` for numpy input.
         """
         xp = get_array_module(x)
@@ -156,7 +156,7 @@ def default_dtype(xp, complex_: bool = False):
     Small per-iteration linear-algebra objects (3x3 Gram matrices, frame-count
     vectors, condition numbers, reduction accumulators) should stay float64
     regardless of this default -- see the ``dtype`` parameter of
-    :func:`phase_shift.methods.aia.aia` for why float32 there is safe and float64
+    :func:`phase.methods.aia.aia` for why float32 there is safe and float64
     for the big arrays is not (memory, and FP64 throughput on non-datacenter
     GPUs).
     """

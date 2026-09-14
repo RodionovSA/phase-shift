@@ -4,15 +4,15 @@ Pre-solve: :func:`_carrier_dc_amplitudes` and the two measurements built on
 it, :func:`measure_frame_contrast` and :func:`measure_frame_visibility`,
 independent estimates of each frame's fringe gain ``g_n`` (Eq. (17) of
 ``docs/interference_model.md``) from its spatial carrier. Not part of
-:class:`phase_shift.solver.PhaseSolver`'s own solve path -- its
+:class:`phase.solver.PhaseSolver`'s own solve path -- its
 ``gain_mode="joint"`` fits ``g_n`` inside the chosen method's own
-iteration instead (see :func:`phase_shift.methods.aia.aia`'s ``fit_gain``),
+iteration instead (see :func:`phase.methods.aia.aia`'s ``fit_gain``),
 which unlike these functions makes no assumption about the fringe
 pattern's spatial frequency. Pass :func:`measure_frame_contrast`'s result
-as :class:`phase_shift.solver.PhaseConfig`'s ``g`` to use it instead.
+as :class:`phase.solver.PhaseConfig`'s ``g`` to use it instead.
 
 Post-solve: :func:`frame_visibility_from_fit` and :func:`phase_step_coverage`,
-computed from an already-fitted :class:`phase_shift.solver.PhaseResult`'s own
+computed from an already-fitted :class:`phase.solver.PhaseResult`'s own
 ``g, b, a, delta`` fields, for checking fit quality after the fact.
 """
 
@@ -48,7 +48,7 @@ def _carrier_dc_amplitudes(stack: np.ndarray, dc_radius: int = 8,
         regardless of ``N``; irrelevant to the result).
     dtype : numpy/cupy dtype, optional
         Working (real) dtype for the per-chunk FFT input. Defaults to
-        ``float32`` (see :func:`phase_shift.backend.default_dtype`).
+        ``float32`` (see :func:`phase.backend.default_dtype`).
 
     Returns
     -------
@@ -128,15 +128,15 @@ def measure_frame_contrast(stack: np.ndarray, dc_radius: int = 8,
     solve, so it can be supplied as a fixed input rather than estimated
     jointly with phase.
 
-    Not part of :class:`phase_shift.solver.PhaseSolver`'s solve path -- its
+    Not part of :class:`phase.solver.PhaseSolver`'s solve path -- its
     ``gain_mode="joint"`` (the default) instead fits ``g_n`` inside the
-    chosen method's own iteration (e.g. :func:`phase_shift.methods.aia.aia`'s
+    chosen method's own iteration (e.g. :func:`phase.methods.aia.aia`'s
     ``fit_gain``), which makes no assumption about the fringe pattern's
     spatial frequency. This function, and :func:`_carrier_dc_amplitudes`
     underneath it, locate a *linear* spatial-carrier sideband in each
     frame's 2-D FFT, so they give a wrong (or undefined) answer on circular
     or otherwise carrier-free fringes. Kept as a standalone utility -- pass
-    its result as :class:`phase_shift.solver.PhaseConfig`'s ``g`` yourself if you
+    its result as :class:`phase.solver.PhaseConfig`'s ``g`` yourself if you
     specifically want this carrier-peak estimate instead of the joint fit --
     and as the basis for :func:`measure_frame_visibility`, the
     cross-stack-comparable metric used for piezo coherence scans.
@@ -214,7 +214,7 @@ def frame_visibility_from_fit(g: np.ndarray, b: np.ndarray, a: np.ndarray) -> np
     Unlike :func:`measure_frame_visibility` (which measures visibility
     directly from the raw stack via its spatial carrier, independent of any
     solve), this is computed from a solver's already-recovered ``g, b, a``
-    -- e.g. :attr:`phase_shift.solver.PhaseResult.g`/``.b``/``.a`` -- so it
+    -- e.g. :attr:`phase.solver.PhaseResult.g`/``.b``/``.a`` -- so it
     reflects whatever those fields actually came out to be, including any
     bias from an imperfect solve. Comparing the two is itself a diagnostic:
     a large disagreement suggests the fit's ``g, b, a`` don't match what the

@@ -13,6 +13,7 @@ import numpy as np
 import yaml
 
 from .backend import get_array_module, to_device
+from .errors import compute_phi_error
 from .methods import METHOD_REGISTRY, MethodParam
 from .methods.base import _fmt_value
 
@@ -41,20 +42,24 @@ class PhaseResult:
         together.
     method_param : MethodParam
         Diagnostics specific to whichever algorithm produced this result
-        (e.g. an :class:`phase_shift.methods.aia.AIAParam` for ``method="aia"``)
+        (e.g. an :class:`phase.methods.aia.AIAParam` for ``method="aia"``)
         -- see :data:`METHODS` and :class:`MethodParam`.
     reconstruction_error : float
         RMSE, in the input stack's original units, between the input stack
         and Eq. (17) evaluated at ``phi, a, b, delta, g, alpha`` -- a
         method-agnostic fit-quality check computed the same way regardless
         of ``method`` (see :meth:`PhaseSolver.fit`).
+    phi_error : np.ndarray, shape (H, W), optional
+        Per-pixel ``sigma_Phi(x, y)``, in radians -- ``docs/aia.md``'s
+        Eq. (22) plus Eq. (34)/(38) (see :func:`phase.errors.compute_phi_error`).
+        Computed for ``method="aia"``; ``None`` for every other method.
 
     Notes
     -----
     Fields are numpy or cupy arrays depending on the solver's ``device``
     argument -- they are not forced back to the host, so that passing them
     on to another GPU-aware step keeps large arrays resident on the GPU.
-    Call :func:`phase_shift.backend.asnumpy` on a field yourself when you need a
+    Call :func:`phase.backend.asnumpy` on a field yourself when you need a
     guaranteed-numpy array.
     """
 
@@ -66,6 +71,7 @@ class PhaseResult:
     alpha: np.ndarray
     method_param: MethodParam
     reconstruction_error: float
+    phi_error: Optional[np.ndarray] = None
 
     def to_device(self, device: str = "auto", dtype=None) -> "PhaseResult":
         """Return a copy with every array field moved to the given device.
@@ -73,17 +79,18 @@ class PhaseResult:
         Parameters
         ----------
         device : {"auto", "cpu", "cuda"}, default "auto"
-            See :func:`phase_shift.backend.to_device`.
+            See :func:`phase.backend.to_device`.
         dtype : dtype, optional
-            Cast while moving; see :func:`phase_shift.backend.to_device`.
+            Cast while moving; see :func:`phase.backend.to_device`.
 
         Returns
         -------
         PhaseResult
             A new instance with ``phi, a, b, delta, g, alpha`` moved to
-            ``device`` (and cast to ``dtype`` if given). ``method_param``
-            and ``reconstruction_error`` are plain Python scalars for every
-            currently registered method, so they're carried over unchanged.
+            ``device`` (and cast to ``dtype`` if given); ``phi_error`` too,
+            when not ``None``. ``method_param`` and ``reconstruction_error``
+            are plain Python scalars for every currently registered method,
+            so they're carried over unchanged.
         """
         return PhaseResult(
             phi=to_device(self.phi, device=device, dtype=dtype),
@@ -94,6 +101,8 @@ class PhaseResult:
             alpha=to_device(self.alpha, device=device, dtype=dtype),
             method_param=self.method_param,
             reconstruction_error=self.reconstruction_error,
+            phi_error=to_device(self.phi_error, device=device, dtype=dtype)
+            if self.phi_error is not None else None,
         )
 
     def print_summary(self) -> None:
@@ -121,14 +130,14 @@ class PhaseConfig:
         How to resolve the per-frame fringe gain ``g_n`` when ``g`` is not
         given. ``"joint"`` fits it jointly with the phase step inside the
         chosen method's own iteration (``fit_gain=True``, e.g.
-        :func:`phase_shift.methods.aia.aia`) -- this makes no assumption about the
+        :func:`phase.methods.aia.aia`) -- this makes no assumption about the
         fringe pattern's spatial frequency, so it works on circular or
         otherwise carrier-free fringes where the older FFT-based estimate
-        (:func:`phase_shift.utils.measure_frame_contrast`) does not. ``"none"``
+        (:func:`phase.utils.measure_frame_contrast`) does not. ``"none"``
         fixes ``g_n = 1`` for every frame. Ignored when ``g`` is given.
     g : np.ndarray, shape (N,), optional
         Precomputed per-frame fringe gain, e.g. from a calibration shot, or
-        from calling :func:`phase_shift.utils.measure_frame_contrast` yourself and
+        from calling :func:`phase.utils.measure_frame_contrast` yourself and
         reusing the result across several fits. When given, this is used
         directly as the fixed gain and ``gain_mode`` is ignored.
     method : str, default "aia"
@@ -144,13 +153,22 @@ class PhaseConfig:
         full ``(N, H, W)`` stack (rather than a small per-frame or
         per-pixel array) run in float64, at the cost of a full-size float64
         temporary copy of the stack at each such point -- see
-        :func:`phase_shift.methods.aia.aia_frame_step`'s docstring for exactly
+        :func:`phase.methods.aia.aia_frame_step`'s docstring for exactly
         where and why. If False, those reductions run at the working
         ``dtype`` instead (normally float32), roughly halving peak memory
         there. Leave True unless your acquisition's own noise floor already
         exceeds float32's rounding margin on this reduction (typically
         around 1e-6, even under a poorly-conditioned ``kappa_p``) -- e.g. a
         convergence tolerance set by measurement noise at 1e-4 or coarser.
+    noise_std : np.ndarray, shape (H, W), optional
+        Per-pixel camera noise standard deviation, ``docs/aia.md``'s
+        ``sigma_0(x, y)`` (Eq. 27a) -- the cross-frame quadrature mean of
+        each frame's own noise (e.g. from a photon transfer curve).
+    phi_error_simplified : bool, default True
+        If True, ``PhaseResult.phi_error`` is ``docs/aia.md`` Eq. (22)'s
+        baseline only. If False, adds Eq. (34)/(38)'s ``delta_n``/``g_n``
+        uncertainty correction -- ``O(1/N_p)`` relative to the baseline
+        (Eq. 34a/38a), at the cost of an ``(N, H, W)``-scale computation.
 
     See :meth:`to_yaml`/:meth:`from_yaml` to save/load a configuration as
     a YAML file.
@@ -162,6 +180,8 @@ class PhaseConfig:
     method: str = "aia"
     method_kwargs: dict = field(default_factory=dict)
     precise_reduce: bool = True
+    noise_std: Optional[np.ndarray] = None
+    phi_error_simplified: bool = True
 
     def __post_init__(self):
         if self.method.lower() not in METHODS:
@@ -194,6 +214,8 @@ class PhaseConfig:
             "method": self.method,
             "method_kwargs": self.method_kwargs,
             "precise_reduce": self.precise_reduce,
+            "noise_std": self.noise_std.tolist() if self.noise_std is not None else None,
+            "phi_error_simplified": self.phi_error_simplified,
         }
 
         return data
@@ -233,30 +255,13 @@ class PhaseConfig:
             raises ``TypeError``, and an invalid ``method`` or ``gain_mode``
             raises ``ValueError`` (same validation as constructing one
             directly).
-
-        Raises
-        ------
-        ValueError
-            If the file contains ``use_g``, ``dc_radius``, ``halfwin``, or
-            ``frame_chunk`` -- the FFT-based gain estimator these configured
-            (:func:`phase_shift.utils.measure_frame_contrast`) has been replaced
-            by the ``gain_mode`` field (``"joint"`` fits gain inside the
-            method's own iteration instead), so a config written for the
-            old estimator would otherwise silently change meaning rather
-            than fail loudly.
         """
         with open(path) as f:
             data = yaml.safe_load(f) or {}
-        removed = {"use_g", "dc_radius", "halfwin", "frame_chunk"} & data.keys()
-        if removed:
-            raise ValueError(
-                f"{path!r} uses removed PhaseConfig field(s) {sorted(removed)} "
-                f"from the old FFT-based gain estimator -- replace them with "
-                f"gain_mode='joint' (fit gain jointly, the new default) or "
-                f"gain_mode='none' (fix g=1)."
-            )
         if data.get("g") is not None:
             data["g"] = np.asarray(data["g"], dtype=float)
+        if data.get("noise_std") is not None:
+            data["noise_std"] = np.asarray(data["noise_std"], dtype=float)
         return cls(**data)
 
 
@@ -267,13 +272,13 @@ class PhaseSolver:
     :meth:`fit` normalizes the input stack (:meth:`_normalize`, gated by
     ``config.use_alpha``), then hands off to the algorithm named by
     ``config.method`` (see :data:`METHODS` for the recognized names, and
-    :data:`phase_shift.methods.METHOD_REGISTRY` for their implementations) to
+    :data:`phase.methods.METHOD_REGISTRY` for their implementations) to
     recover ``phi, a, b, delta`` -- and, when ``config.gain_mode ==
     "joint"`` (the default) and no explicit ``config.g`` is given, ``g``
     jointly with them, inside that method's own iteration. Results are read
     back from the fitted ``PhaseSolver`` via the ``phi_``, ``a_``, ``b_``,
-    ``delta_``, ``g_``, ``alpha_``, ``method_param_``, ``reconstruction_error_``
-    properties -- see :class:`PhaseResult` for their definitions.
+    ``delta_``, ``g_``, ``alpha_``, ``method_param_``, ``reconstruction_error_``,
+    ``phi_error_`` properties -- see :class:`PhaseResult` for their definitions.
     """
 
     def __init__(self, config: PhaseConfig, device: str = "auto", dtype=None):
@@ -284,10 +289,10 @@ class PhaseSolver:
             Which method to run and how (see :class:`PhaseConfig`);
             validated at construction, immutable afterward.
         device : {"auto", "cpu", "cuda"}, default "auto"
-            See :func:`phase_shift.backend.to_device`.
+            See :func:`phase.backend.to_device`.
         dtype : dtype, optional
             Working dtype for the staged stack. Defaults to whatever
-            :func:`phase_shift.backend.to_device` chooses when left unset.
+            :func:`phase.backend.to_device` chooses when left unset.
         """
         self.config = config
         self.device = device
@@ -341,15 +346,27 @@ class PhaseSolver:
         carrier = g[:, xp.newaxis, xp.newaxis] * b[xp.newaxis, :, :] \
             * xp.cos(phi[xp.newaxis, :, :] + delta_field)
         rec_stack = alpha[:, xp.newaxis, xp.newaxis] * (a[xp.newaxis, :, :] + carrier)
-        rmse = float(xp.sqrt(xp.mean((stack - rec_stack) ** 2)))
+        residual = stack - rec_stack
+        rmse = float(xp.sqrt(xp.mean(residual ** 2)))
 
-        self.result_ = PhaseResult(phi, a, b, delta, g, alpha, method_param, rmse)
+        # Per-pixel fallback for phi_error's sigma_0(x, y) when noise_std isn't
+        # given: the same residual as rmse, averaged over frames only (axis 0)
+        # rather than over pixels too, so it stays a map.
+        if self.config.noise_std is not None:
+            noise_std = to_device(self.config.noise_std, device=self.device, dtype=self.dtype)
+        else:
+            noise_std = xp.sqrt(xp.mean(residual ** 2, axis=0))
+        phi_error = compute_phi_error(self.config.method, b, phi, delta, g, fit_gain,
+                                       noise_std, self.config.phi_error_simplified,
+                                       method_param, xp)
+
+        self.result_ = PhaseResult(phi, a, b, delta, g, alpha, method_param, rmse, phi_error)
         return self
     
     def _solve(self, stack: np.ndarray, g: np.ndarray, fit_gain: bool):
         """Dispatch to the configured method and recover its Eq. (17) fields.
 
-        Looks up ``config.method`` in :data:`phase_shift.methods.METHOD_REGISTRY`
+        Looks up ``config.method`` in :data:`phase.methods.METHOD_REGISTRY`
         (already validated to exist by :class:`PhaseConfig`) and calls it
         with the normalized ``stack``, initial ``g``, ``fit_gain``
         (``config.gain_mode == "joint"`` and no explicit ``config.g``, see
@@ -360,7 +377,7 @@ class PhaseSolver:
         -------
         a, b, phi, delta, g, method_param
             See the chosen method's function for details (e.g.
-            :func:`phase_shift.methods.aia.aia` for ``method="aia"``); ``g`` is
+            :func:`phase.methods.aia.aia` for ``method="aia"``); ``g`` is
             the input ``g`` unchanged when ``fit_gain=False``, or the
             jointly fitted gain otherwise.
         """
@@ -445,3 +462,8 @@ class PhaseSolver:
     def reconstruction_error_(self) -> float:
         self._check_fitted()
         return self.result_.reconstruction_error
+
+    @property
+    def phi_error_(self) -> Optional[np.ndarray]:
+        self._check_fitted()
+        return self.result_.phi_error

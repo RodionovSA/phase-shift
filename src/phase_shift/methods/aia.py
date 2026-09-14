@@ -31,7 +31,11 @@ class AIAParam(MethodParam):
         the frame step to reliably separate ``delta_n`` from noise, even
         when the loop reports ``converged``.
     predicted_rms : float
-        Predicted RMS phase error, in radians (Chen & Kemao 2019, Eq. 28/40).
+        Predicted RMS phase error, in radians (Chen & Kemao 2019, Eq. 28/40) -- an
+        empirical fit, not an exact result, and optimistic by ``sqrt(N/(N-3))`` from
+        ``sigma``'s degrees-of-freedom bias and by ``median(b)`` vs. a low-contrast-pixel
+        weighted average; see ``docs/aia.md`` §"Direct phase-error computation" for the
+        exact first-order expression and both caveats.
     iters_run : int
         Number of alternating least-squares iterations actually run.
     converged : bool
@@ -163,7 +167,7 @@ def _aia_diagnostics(I, delta_fit, g, a, u, v, N, xp, iters_run: int, converged:
     """Assemble :class:`AIAParam` from a solved ``(a, u, v)`` and the piston
     ``delta`` it was fit against.
 
-    Factored out of :func:`aia` so :func:`phase_shift.methods.step_field.aia_step_field`
+    Factored out of :func:`aia` so :func:`phase.methods.step_field.aia_step_field`
     can recompute the same diagnostics for its own final, refined solution --
     see :class:`AIAParam` and ``docs/aia.md`` for the derivations.
 
@@ -279,7 +283,7 @@ def aia_pixel_step(stack: np.ndarray, delta: np.ndarray, g: Optional[np.ndarray]
         contrast variation).
     dtype : numpy/cupy dtype, optional
         Working dtype for the returned ``(P,)`` fields. Defaults to
-        ``stack``'s array module's :func:`phase_shift.backend.default_dtype`. The
+        ``stack``'s array module's :func:`phase.backend.default_dtype`. The
         design matrix and pseudoinverse are always computed in float64
         regardless of this setting.
 
@@ -322,11 +326,14 @@ def aia_frame_step(stack: np.ndarray, u: np.ndarray, v: np.ndarray,
 
     ``c_n`` is left free rather than folded into the pixel step's ``a``:
     re-deriving it from raw data every call was found more robust than
-    carrying forward a mid-iteration estimate of ``a``.
+    carrying forward a mid-iteration estimate of ``a``. See ``docs/aia.md``
+    §"Why the background field can be dropped" for why dropping ``a`` here
+    is exact up to a bounded, frame-independent gauge displacement, not
+    merely an approximation.
 
     Returned ``delta`` is absolute (not pinned to a phase origin) and ``g``
     is unnormalized -- a caller iterating on ``delta`` or wanting
-    ``median(g) = 1`` (see :attr:`phase_shift.solver.PhaseResult.g`) must do so
+    ``median(g) = 1`` (see :attr:`phase.solver.PhaseResult.g`) must do so
     itself.
 
     Parameters
@@ -336,7 +343,7 @@ def aia_frame_step(stack: np.ndarray, u: np.ndarray, v: np.ndarray,
     u, v : np.ndarray, shape (P,)
         Quadrature components, e.g. as returned by :func:`aia_pixel_step`.
     precise_reduce : bool, default True
-        See :attr:`phase_shift.solver.PhaseConfig.precise_reduce`.
+        See :attr:`phase.solver.PhaseConfig.precise_reduce`.
 
     Returns
     -------
@@ -402,14 +409,14 @@ def aia(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
     ----------
     stack : np.ndarray, shape (N, H, W)
         Phase-shifted interferogram frames, already alpha-normalized and on
-        the target device (:meth:`phase_shift.solver.PhaseSolver.fit` does both).
+        the target device (:meth:`phase.solver.PhaseSolver.fit` does both).
     g : np.ndarray, shape (N,)
         Per-frame fringe contrast. Fixed when ``fit_gain=False``, initial
         guess when ``fit_gain=True``.
     fit_gain : bool, default False
         Recover ``g_n`` jointly with ``delta_n`` instead of holding it
         fixed. Prefer this over an out-of-band estimate (e.g.
-        :func:`phase_shift.utils.measure_frame_contrast`, which needs a spatial
+        :func:`phase.utils.measure_frame_contrast`, which needs a spatial
         carrier and fails on circular/carrier-free fringes) whenever
         contrast drifts frame-to-frame.
     delta0 : np.ndarray, shape (N,), optional
@@ -423,11 +430,11 @@ def aia(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
         (and, when ``fit_gain`` is True, in ``g``) between iterations.
     dtype : numpy/cupy dtype, optional
         Working dtype for the ``(N, P)``-shaped arrays. Defaults to
-        ``float32`` (see :func:`phase_shift.backend.default_dtype`); the small
+        ``float32`` (see :func:`phase.backend.default_dtype`); the small
         per-iteration linear algebra always runs in float64 regardless of
         this setting.
     precise_reduce : bool, default True
-        See :attr:`phase_shift.solver.PhaseConfig.precise_reduce`.
+        See :attr:`phase.solver.PhaseConfig.precise_reduce`.
 
     Returns
     -------
@@ -437,7 +444,7 @@ def aia(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
         ``g`` unchanged when ``fit_gain=False``, or the jointly fitted
         contrast (``median(g) = 1``) when True. Numpy or cupy arrays
         matching ``stack``'s array module, not forced back to the host --
-        call :func:`phase_shift.backend.asnumpy` yourself if needed.
+        call :func:`phase.backend.asnumpy` yourself if needed.
     method_param : AIAParam
         Convergence and accuracy diagnostics -- see :class:`AIAParam`.
 

@@ -1,15 +1,15 @@
-"""Fast unit tests for `phase_shift`, on small synthetic stacks (no data/ files needed).
+"""Fast unit tests for `phase`, on small synthetic stacks (no data/ files needed).
 
 These exist to catch regressions in seconds during the CPU<->GPU backend
-work (see src/phase_shift/backend.py) without loading the ~1.5 GB real acquisitions in
-data/. These check the math and the numpy/cupy dispatch. Validation against
-real acquisitions remains in the original holoeml-processing repository.
+work (see phase/backend.py) without loading the ~1.5 GB real acquisitions in
+data/ -- run with real data (scripts/test/*.ipynb) remains the authority on
+physical correctness; these check the math and the numpy/cupy dispatch.
 """
 
 import numpy as np
 import pytest
 
-from phase_shift import (
+from phase import (
     PhaseConfig,
     PhaseSolver,
     apply_phase_ripple,
@@ -19,8 +19,8 @@ from phase_shift import (
     remove_carrier,
     subtract_reference,
 )
-from phase_shift.backend import CUPY_AVAILABLE, wrap
-from phase_shift.methods.step_field import _poly_basis, step_field_quality
+from phase.backend import CUPY_AVAILABLE, wrap
+from phase.methods.step_field import _poly_basis, step_field_quality
 
 
 def circ_rms_deg(a: np.ndarray, b: np.ndarray) -> float:
@@ -154,7 +154,7 @@ class TestAIA:
 
     def test_precise_reduce_false_close_to_true(self):
         # precise_reduce only changes which dtype aia_frame_step's
-        # stack-scale reduction runs in (src/phase_shift/methods/aia.py) -- the
+        # stack-scale reduction runs in (phase/methods/aia.py) -- the
         # recovered phase should be indistinguishable at the same threshold
         # test_dtype_float32_close_to_float64 already uses for a genuine
         # dtype change.
@@ -177,7 +177,7 @@ class TestAIA:
 
     def test_fit_gain_false_returns_g_unchanged(self):
         stack, truth = make_stack(seed=6)
-        from phase_shift.methods.aia import aia
+        from phase.methods.aia import aia
         a, b, phi, delta, g_out, mp = aia(stack, truth["g"], fit_gain=False)
         assert np.array_equal(g_out, truth["g"])
         assert np.all(mp.c_fit == 0)
@@ -207,7 +207,7 @@ class TestAIA:
         with its public building blocks and checking the residual never
         increases round over round (the c_n-consistency fix, see aia.py).
         """
-        from phase_shift.methods.aia import aia_frame_step, aia_pixel_step
+        from phase.methods.aia import aia_frame_step, aia_pixel_step
 
         stack, _ = make_stack(seed=10, N=14)
         N = stack.shape[0]
@@ -322,7 +322,7 @@ class TestStepField:
         # Same equivalence check as TestAIA's, for aia_step_field's own
         # stack-scale reductions (aia_frame_step inside the refine loop,
         # step_field_quality's model/resid reconstruction, and its RMS
-        # ratio -- all in src/phase_shift/methods/step_field.py).
+        # ratio -- all in phase/methods/step_field.py).
         stack, truth = make_step_field_stack(kind="linear", gain_std=0.3)
         kw = dict(iters=40, tol=1e-6, degree=1, refine_iters=8, refine_tol=1e-8, crop=5)
         cfg_precise = PhaseConfig(use_alpha=False, gain_mode="joint", method="aia_step_field",
@@ -377,7 +377,7 @@ class TestStepField:
         control flow of the refinement loop is tested in isolation from the
         actual per-frame fit quality.
         """
-        import phase_shift.methods.step_field as sf
+        import phase.methods.step_field as sf
 
         stack, _ = make_step_field_stack(kind="quadratic", H=16, W=16, N=6)
         rms_seq = iter([0.20, 0.35, 0.19, 0.19])

@@ -180,7 +180,7 @@ def _estimate_curvature(c: np.ndarray, w: np.ndarray, window: bool,
     propagates into ``kxx, kyy, kxy``. The resulting difference in the
     final ``phi`` is well within the acquisition-to-acquisition scatter
     this package otherwise expects (see
-    :func:`~phase_shift.combine.combine_acquisitions`).
+    :func:`~phase.combine.combine_acquisitions`).
     """
     xp = get_array_module(c, w)
     H, W = c.shape
@@ -343,10 +343,10 @@ def remove_carrier(phi: np.ndarray, weight: Optional[np.ndarray] = None,
     Parameters
     ----------
     phi : np.ndarray, shape (H, W)
-        Wrapped phase map, in ``(-pi, pi]`` (e.g. :attr:`phase_shift.solver.PhaseResult.phi`).
+        Wrapped phase map, in ``(-pi, pi]`` (e.g. :attr:`phase.solver.PhaseResult.phi`).
     weight : np.ndarray, shape (H, W), optional
         Per-pixel reliability used only for *estimating* the carrier (e.g.
-        :attr:`phase_shift.solver.PhaseResult.b`, the modulation map) --
+        :attr:`phase.solver.PhaseResult.b`, the modulation map) --
         down-weights noisy, low-modulation pixels so they don't bias the
         fit. Negative values are clipped to 0. Does not affect the returned
         ``phi``, which is always computed from the unweighted field.
@@ -379,7 +379,7 @@ def remove_carrier(phi: np.ndarray, weight: Optional[np.ndarray] = None,
         e.g. too small an image for the requested grid, or ``weight``/
         ``mask`` leaving too little usable area.
     device : {"auto", "cpu", "cuda"}, default "auto"
-        Where to run -- see :func:`phase_shift.backend.to_device` for the full
+        Where to run -- see :func:`phase.backend.to_device` for the full
         explanation. ``phi``/``weight``/``mask`` are uploaded if
         needed; the result's ``phi`` field stays on that same device rather
         than being downloaded automatically.

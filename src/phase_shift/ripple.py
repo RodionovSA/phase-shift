@@ -55,8 +55,8 @@ def estimate_phase_ripple(phi: np.ndarray, mask: np.ndarray,
     deterministic function of the recovered phase itself, ``eps(phi)``,
     rather than of position -- the signature of an imperfect frame model
     (e.g. per-frame contrast treated as constant when it isn't; see
-    :class:`phase_shift.solver.PhaseConfig`'s ``gain_mode`` and
-    :func:`phase_shift.utils.measure_frame_contrast`). Because it tracks phase,
+    :class:`phase.solver.PhaseConfig`'s ``gain_mode`` and
+    :func:`phase.utils.measure_frame_contrast`). Because it tracks phase,
     not position, it doesn't average out spatially
     and isn't separable from real structure by a spatial filter (e.g. FFT)
     when the two overlap in spatial frequency -- but it *is* separable in
@@ -65,7 +65,7 @@ def estimate_phase_ripple(phi: np.ndarray, mask: np.ndarray,
 
     This estimates ``eps(phi)`` from a region where the true phase is known
     to be smooth (e.g. bare substrate surrounding a structure): after
-    :func:`~phase_shift.carrier.remove_carrier` strips the smooth tilt/defocus/
+    :func:`~phase.carrier.remove_carrier` strips the smooth tilt/defocus/
     piston trend, whatever is left in that region should be ~0 plus
     ``eps(phi)`` plus noise. Binning that leftover by the *original*
     (pre-carrier-removal) wrapped phase and fitting a low-order Fourier
@@ -75,7 +75,7 @@ def estimate_phase_ripple(phi: np.ndarray, mask: np.ndarray,
     so it does not blur, smooth, or otherwise touch spatial resolution.
 
     Apply this to the sample and reference phase maps *separately*, before
-    :func:`~phase_shift.reference.subtract_reference` -- their ripples generally
+    :func:`~phase.reference.subtract_reference` -- their ripples generally
     differ (different per-frame contrast/step sequences), so in the
     difference they beat against each other into a low spatial frequency
     instead of canceling; correcting each map on its own is what actually
@@ -85,7 +85,7 @@ def estimate_phase_ripple(phi: np.ndarray, mask: np.ndarray,
     ----------
     phi : np.ndarray, shape (H, W)
         Wrapped phase map to estimate the ripple from (e.g.
-        :attr:`phase_shift.solver.PhaseResult.phi`, *before* carrier removal).
+        :attr:`phase.solver.PhaseResult.phi`, *before* carrier removal).
     mask : np.ndarray, shape (H, W)
         Boolean (or 0/1) map selecting the known-flat region (e.g. thresholded
         modulation map, or a hand-drawn ROI excluding the structure).
@@ -105,11 +105,11 @@ def estimate_phase_ripple(phi: np.ndarray, mask: np.ndarray,
         phase value, so the correction itself is not binned/quantized.
     carrier_kwargs : dict, optional
         Extra keyword arguments forwarded to the internal
-        :func:`~phase_shift.carrier.remove_carrier` call (defaults to
+        :func:`~phase.carrier.remove_carrier` call (defaults to
         ``defocus=True, refine_iters=10, n_blocks=10``, matching
         ``remove_carrier``'s own defaults).
     device : {"auto", "cpu", "cuda"}, default "auto"
-        Where to run -- see :func:`phase_shift.backend.to_device` for the full
+        Where to run -- see :func:`phase.backend.to_device` for the full
         explanation.
 
     Returns
