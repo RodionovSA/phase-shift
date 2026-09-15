@@ -13,7 +13,7 @@ is derived from this dict's keys, nothing else changes.
 
 from .base import MethodParam
 from .aia import aia
-from .step_field import aia_step_field
+from .sf_aia import aia_step_field
 
 METHOD_REGISTRY = {
     "aia": aia,

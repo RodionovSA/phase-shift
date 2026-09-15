@@ -23,18 +23,18 @@ existing choices; it does not introduce new ones.
 | With `g_n` free, `(u,v)` determined only up to any invertible `M` (`GL(2)`), not just a rotation | Whiten `(u,v)` so `Σu² = Σv²`, `Σu·v = 0` — collapses `GL(2)` down to `O(2)`, the same residual ambiguity plain (`g≡1`) AIA already has | `aia.py` (`_whiten_uv`); derivation in `docs/aia.md` §"A gauge freedom that only appears once g_n is free" |
 | `(g_n, δ_n) → (−g_n, δ_n+π)` | `g_n = hypot(P_n, Q_n) ≥ 0` always | `aia.py` (`aia_frame_step`) |
 
-## Step-field refinement (`aia_step_field`)
+## SF-AIA (`aia_step_field`)
 
 | Freedom | Convention | Where |
 |---|---|---|
-| Spatial split of `δ_n(x,y)` into piston `δ_n` + field `Δ_n(x,y)` | Origin at the field centroid, coordinates scaled to ≈`[-1,1]`, each basis term zero-mean over the field, orthonormalized in ascending degree | `step_field.py` (`_poly_basis`); `step_field_residuals.md` §1.2(i), Eq. T3 |
-| `c_jn ↔ Φ`: a per-frame-constant basis coefficient is indistinguishable from part of `Φ` | Frame-mean-zero: `c_jn ← c_jn − mean_n(c_jn)`, applied before correcting the data each refine round. **`StepFieldParam.coeffs` is reported un-gauge-fixed** — subtract the frame mean yourself before reading a row as physical per-frame drift. | `step_field.py` (`aia_step_field`); `step_field_residuals.md` §1.2(ii)/§8.4, Eq. T3b/E4 |
+| Spatial split of `δ_n(x,y)` into piston `δ_n` + field `Δ_n(x,y)` | Origin at the field centroid, coordinates scaled to ≈`[-1,1]`, each basis term zero-mean over the field, orthonormalized in ascending degree | `sf_aia.py` (`_poly_basis`); `sf_aia.md` §1.2(i), Eq. T3 |
+| `c_jn ↔ Φ`: a per-frame-constant basis coefficient is indistinguishable from part of `Φ` | Frame-mean-zero: `c_jn ← c_jn − mean_n(c_jn)`, applied before correcting the data each refine round. **`StepFieldParam.coeffs` is reported un-gauge-fixed** — subtract the frame mean yourself before reading a row as physical per-frame drift. | `sf_aia.py` (`aia_step_field`); `sf_aia.md` §1.2(ii)/§8.4, Eq. T3b/E4 |
 
 ## Carrier removal (`remove_carrier`)
 
 | Freedom | Convention | Where |
 |---|---|---|
-| Spatial origin for the tilt/curvature/piston split (origin-dependent — differs from the step-field's centroid convention above) | Pixel `(0,0)`, unnormalized `x,y` | `carrier.py` |
+| Spatial origin for the tilt/curvature/piston split (origin-dependent — differs from SF-AIA's centroid convention above) | Pixel `(0,0)`, unnormalized `x,y` | `carrier.py` |
 | Global piston of the output | Weighted circular mean set to zero: `arg(Σ w·e^{iφ}) = 0` | `carrier.py` |
 | Carrier frequency `(fx,fy)`, defined only modulo 1 cycle/pixel | FFT-bin peak picks the representative; the refine step tracks the nearest branch to the current estimate | `carrier.py`; `carrier_removal.md` §4 |
 

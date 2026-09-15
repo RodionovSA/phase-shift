@@ -20,7 +20,7 @@ from phase import (
     subtract_reference,
 )
 from phase.backend import CUPY_AVAILABLE, wrap
-from phase.methods.step_field import _poly_basis, step_field_quality
+from phase.methods.sf_aia import _poly_basis, step_field_quality
 
 
 def circ_rms_deg(a: np.ndarray, b: np.ndarray) -> float:
@@ -62,7 +62,7 @@ def make_step_field_stack(H=40, W=48, N=16, seed=7, kind="quadratic", dtype=np.f
       degree-1 (tilt-only) fit cannot represent this at all.
     - ``"static_quadratic"``: the same curvature shape, but identical every frame (no
       frame-to-frame variation) -- should be invisible to the step-field mechanism and
-      fully absorbed into the recovered phase instead (docs/step_field_residuals.md §9.3).
+      fully absorbed into the recovered phase instead (docs/sf_aia.md §9.3).
 
     ``gain_std`` adds random per-frame contrast on top of the default ``g_true = 1``
     (still normalized to ``median(g_true) = 1``), for exercising ``fit_gain=True``
@@ -322,7 +322,7 @@ class TestStepField:
         # Same equivalence check as TestAIA's, for aia_step_field's own
         # stack-scale reductions (aia_frame_step inside the refine loop,
         # step_field_quality's model/resid reconstruction, and its RMS
-        # ratio -- all in phase/methods/step_field.py).
+        # ratio -- all in phase/methods/sf_aia.py).
         stack, truth = make_step_field_stack(kind="linear", gain_std=0.3)
         kw = dict(iters=40, tol=1e-6, degree=1, refine_iters=8, refine_tol=1e-8, crop=5)
         cfg_precise = PhaseConfig(use_alpha=False, gain_mode="joint", method="aia_step_field",
@@ -377,7 +377,7 @@ class TestStepField:
         control flow of the refinement loop is tested in isolation from the
         actual per-frame fit quality.
         """
-        import phase.methods.step_field as sf
+        import phase.methods.sf_aia as sf
 
         stack, _ = make_step_field_stack(kind="quadratic", H=16, W=16, N=6)
         rms_seq = iter([0.20, 0.35, 0.19, 0.19])

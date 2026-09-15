@@ -2,7 +2,7 @@
 
 Computed from a method's *output* (``b, phi, delta, g``), not from inside the
 method itself -- see ``docs/aia.md`` "Direct phase-error computation" for the
-derivation (Eq. 21-38) and ``docs/step_field_residuals.md`` §9 (Eq. E5-E9)
+derivation (Eq. 21-38) and ``docs/sf_aia.md`` §9 (Eq. E5-E9)
 for the ``aia_step_field``/``aia_tilt`` extension. :func:`compute_phi_error`
 is the single entry point :class:`phase.solver.PhaseSolver` calls; it
 dispatches on ``method`` and currently computes a result for ``"aia"`` and
@@ -14,7 +14,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from .methods.step_field import _poly_basis
+from .methods.sf_aia import _poly_basis
 
 
 def compute_phi_error(method: str, b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
@@ -50,7 +50,7 @@ def compute_phi_error(method: str, b: np.ndarray, phi: np.ndarray, delta: np.nda
         both are ``O(1/N_p)`` relative to the baseline.
     method_param : MethodParam
         The fitted result's own diagnostics (e.g. an
-        :class:`phase.methods.step_field.StepFieldParam` for
+        :class:`phase.methods.sf_aia.StepFieldParam` for
         ``method="aia_step_field"``) -- only its ``.degree`` is used here,
         to rebuild the step-field basis.
     xp : module
@@ -90,7 +90,7 @@ def _aia_phi_error_parts(b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: n
     Factored out of :func:`compute_phi_error`'s plain-``aia`` branch so
     :func:`_aia_step_field_phi_error` can reuse ``w_dot_k`` (built from
     Eq. 29's leverage vectors) rather than recomputing it -- the step-field
-    discount (``docs/step_field_residuals.md`` Eq. E9) needs the same
+    discount (``docs/sf_aia.md`` Eq. E9) needs the same
     quantity as Eq. (34)/(38)'s own correction term.
 
     Parameters
@@ -168,7 +168,7 @@ def _aia_phi_error_parts(b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: n
 def _aia_step_field_phi_error(b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
                                g: np.ndarray, fit_gain: bool, sigma0,
                                simplified: bool, degree: int, xp) -> np.ndarray:
-    """``docs/step_field_residuals.md``'s AIA-with-step-field phase-error map, Eq. (E9).
+    """``docs/sf_aia.md``'s AIA-with-step-field phase-error map, Eq. (E9).
 
     ``docs/aia.md``'s Eq. (22)/(34)/(38) (via :func:`_aia_phi_error_parts`)
     discounted by the step-field fit's own leverage (Eq. E7): each frame's
@@ -191,8 +191,8 @@ def _aia_step_field_phi_error(b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
         together for consistency.
     degree : int
         Highest total polynomial degree of the fitted step field (
-        :attr:`phase.methods.step_field.StepFieldParam.degree`); ``0``
-        means no step field (:func:`phase.methods.step_field._poly_basis`
+        :attr:`phase.methods.sf_aia.StepFieldParam.degree`); ``0``
+        means no step field (:func:`phase.methods.sf_aia._poly_basis`
         returns an empty basis), so the discount is identically zero and
         this reduces to the plain-``aia`` result.
     xp : module
@@ -225,7 +225,7 @@ def _aia_step_field_phi_error(b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
     # Eq. (E1)'s own w_n^2-weighted Gram matrix, one (J, J) solve per frame
     # -- the same computation fit_step_field does internally, recomputed
     # here from data already in hand rather than threading a new return
-    # value through phase/methods/step_field.py. Kept in the working dtype
+    # value through phase/methods/sf_aia.py. Kept in the working dtype
     # throughout (unlike the frame-side-only C/C_inv above): G is a
     # reduction over the big (N, P) data, not a small per-iteration object,
     # so the same "cast big arrays down, not small ones up" rule as

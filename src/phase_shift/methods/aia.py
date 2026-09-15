@@ -167,7 +167,7 @@ def _aia_diagnostics(I, delta_fit, g, a, u, v, N, xp, iters_run: int, converged:
     """Assemble :class:`AIAParam` from a solved ``(a, u, v)`` and the piston
     ``delta`` it was fit against.
 
-    Factored out of :func:`aia` so :func:`phase.methods.step_field.aia_step_field`
+    Factored out of :func:`aia` so :func:`phase.methods.sf_aia.aia_step_field`
     can recompute the same diagnostics for its own final, refined solution --
     see :class:`AIAParam` and ``docs/aia.md`` for the derivations.
 

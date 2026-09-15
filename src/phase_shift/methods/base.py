@@ -46,7 +46,7 @@ class MethodParam:
         reconstruction-error check calls this instead of assuming ``delta``
         broadcasts directly, so a new method needs only override this to be
         handled there (see
-        :class:`phase.methods.step_field.StepFieldParam`).
+        :class:`phase.methods.sf_aia.StepFieldParam`).
 
         Parameters
         ----------

@@ -3,7 +3,7 @@
 Builds on :mod:`phase.methods.aia`: :func:`fit_step_field` and
 :func:`step_field_quality` are the per-frame step-field-coefficient
 regression and its quality check derived in
-``docs/step_field_residuals.md`` (its §8, Eqs. E1-E4); :func:`aia_step_field`
+``docs/sf_aia.md`` (its §8, Eqs. E1-E4); :func:`aia_step_field`
 is the full solve that alternates the piston-only AIA pixel/frame step with
 this fit until the fit stops improving. ``degree=1`` recovers the pure
 linear-tilt model; higher degrees add curvature and beyond.
@@ -28,7 +28,7 @@ def _poly_basis(H: int, W: int, degree: int, xp):
     Monomials of total degree ``1..degree`` in ``(x, y)`` on centered,
     unit-normalized coordinates, mean-subtracted (the field-mean-zero
     gauge, Eq. T3) and Gram-Schmidt-orthonormalized in ascending degree
-    order -- see ``docs/step_field_residuals.md`` §1.2(i). ``degree=0``
+    order -- see ``docs/sf_aia.md`` §1.2(i). ``degree=0``
     returns the empty ``(0, H*W)`` basis (no step field, the piston-only
     model). Cached per ``(H, W, degree, xp)``: :func:`aia_step_field` calls
     this every refinement iteration at the same shape/degree.
@@ -95,7 +95,7 @@ def fit_step_field(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.ndarra
     A spatially-varying phase-step error leaves a first-order residual in
     the piston-model AIA fit, linear in each frame's coefficients
     ``c_1n..c_Jn`` -- the transpose of :func:`aia_pixel_step`'s per-pixel
-    regression across frames. See ``docs/step_field_residuals.md`` §8,
+    regression across frames. See ``docs/sf_aia.md`` §8,
     Eq. (E1) for the derivation (``G^(n) c = -h^(n)`` solved independently
     per frame).
 
@@ -312,7 +312,7 @@ class StepFieldParam(MethodParam):
         Per-frame step-field coefficients ``c_jn`` from the *best* round
         (see ``best_iter``), fit against the ``(a, u, v, delta)`` this
         result reports. Raw per-frame least-squares fit, not gauge-fixed
-        (``docs/step_field_residuals.md`` Eq. T3b) -- subtract
+        (``docs/sf_aia.md`` Eq. T3b) -- subtract
         ``coeffs.mean(axis=1, keepdims=True)`` yourself before reading a
         row as physical per-frame drift.
     coeffs_rms : np.ndarray, shape (J,)
@@ -402,7 +402,7 @@ def aia_step_field(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
     removing its estimated contribution from the *original* stack before
     re-running the pixel/frame step -- until the round-over-round
     improvement in ``rms_frac`` falls below ``refine_tol`` or
-    ``refine_iters`` is spent. See ``docs/step_field_residuals.md`` §8.2
+    ``refine_iters`` is spent. See ``docs/sf_aia.md`` §8.2
     ("The algorithm") for the full step-by-step derivation, and
     ``docs/aia.md`` for the inner piston-only solve.
 
@@ -429,7 +429,7 @@ def aia_step_field(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
         :func:`_poly_basis`); ``0`` disables the step-field correction
         entirely, returning the plain-``aia`` result. ``1`` is a pure
         linear tilt (registered separately as ``"aia_tilt"``), ``2`` adds
-        curvature. ``docs/step_field_residuals.md`` §7 recommends keeping
+        curvature. ``docs/sf_aia.md`` §7 recommends keeping
         this small (2-3).
     refine_iters : int, default 5
         Maximum number of refinement rounds. ``0`` skips refinement

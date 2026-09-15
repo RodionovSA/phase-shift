@@ -7,10 +7,10 @@ all: the measurement in [`interference_model.md`](interference_model.md) constra
 never $\Phi$, so any estimator built from $\Phi$ or a difference of $\Phi$'s carries a spurious
 $2\pi$-wrap ambiguity that one built from $e^{i\Phi}$ does not. It backs `phase.carrier`, and its
 basis is the same degree-$M$ polynomial family
-[`step_field_residuals.md`](step_field_residuals.md) already built for the spatially-varying
-phase-step field — the carrier is that family's static member (§6 makes this precise).
+[`sf_aia.md`](sf_aia.md) already built for the spatially-varying
+phase-step error field — the carrier is that family's static member (§6 makes this precise).
 
-Unlike `interference_model.md`'s and `step_field_residuals.md`'s derivations, the $(x,y)$
+Unlike `interference_model.md`'s and `sf_aia.md`'s derivations, the $(x,y)$
 dependence is not suppressed here: the whole subject is the spatial shape of $\Phi$, so pixel
 coordinates stay explicit throughout.
 
@@ -46,14 +46,14 @@ wrap-safe difference of it) instead.
 
 ### 1.3 Basis and its gauge
 
-Reuse `step_field_residuals.md` Eq. (T1)/(T3) directly: on coordinates centred at the field
+Reuse `sf_aia.md` Eq. (T1)/(T3) directly: on coordinates centred at the field
 centroid and scaled to $\approx[-1,1]$, $p_1,\dots,p_J$ are the monomials of total degree $1$
 through $M$, each made zero-mean over the field and Gram–Schmidt-orthonormalized in ascending
-degree ($J = \tfrac{(M+1)(M+2)}{2}-1$) — exactly what `phase.methods.step_field._poly_basis`
+degree ($J = \tfrac{(M+1)(M+2)}{2}-1$) — exactly what `phase.methods.sf_aia._poly_basis`
 already builds; this document does not redefine it.
 
 Carrier removal additionally needs the constant term that basis deliberately excludes (it is
-exactly the step field's piston $\delta_n$ there, Eq. T1). Add it back as $p_0(x,y) \equiv
+exactly the SF-AIA model's piston $\delta_n$ there, Eq. T1). Add it back as $p_0(x,y) \equiv
 1/\sqrt{N_p}$ ($N_p = H\times W$, so $p_0$ has unit norm over the field). Because every $p_j$,
 $j\ge1$, is field-mean-zero (Eq. T3), $p_0$ is automatically orthogonal to all of them — no
 re-orthonormalization needed — so $\{p_0, p_1, \dots, p_J\}$ is an orthonormal basis of
@@ -167,7 +167,7 @@ for (minus) the Hessian, a Newton step toward the maximizer solves
 $$\boxed{H\,\Delta\mathbf a = \mathbf g} \tag{C7}$$
 
 $H$ is a $\cos(r)$-**weighted** Gram matrix of the basis — the direct structural analogue of
-`step_field_residuals.md` Eq. (E1)'s $w_n^2$-weighted $G^{(n)}$ — and inherits the same warning
+`sf_aia.md` Eq. (E1)'s $w_n^2$-weighted $G^{(n)}$ — and inherits the same warning
 given there (§8.3): orthonormal under the plain (unweighted) field inner product, which
 $\{p_j\}$ is by construction (§1.3), does **not** imply orthogonal under this weight. Define
 
@@ -237,8 +237,8 @@ estimate itself.
 
 One consequence for the existing gauge table: `gauge_conventions.md`'s `remove_carrier` row
 records the origin as pixel $(0,0)$ with unnormalized $x,y$ — different from the centroid,
-unit-scaled convention §1.3 inherits from the step field. Adopting §1.3's basis resolves that
-clash in favour of the step field's convention, once the code follows this derivation.
+unit-scaled convention §1.3 inherits from SF-AIA. Adopting §1.3's basis resolves that
+clash in favour of SF-AIA's convention, once the code follows this derivation.
 
 ### 5.1 Reading `CarrierResult` against this section
 
@@ -250,23 +250,23 @@ since the two use different bases, a different coordinate origin, and different 
 comparable only through the reconstructed field $P(x,y)$ each produces, never
 coefficient-by-coefficient.
 
-## 6. Relation to the step field
+## 6. Relation to SF-AIA
 
-The carrier and the step field $\Delta_n(x,y)$ occupy the *same* polynomial span
-$\{p_1,\dots,p_J\}$: by `step_field_residuals.md` Eq. (T3b), the frame-mean of the step-field
+The carrier and the phase-step error field $\Delta_n(x,y)$ occupy the *same* polynomial span
+$\{p_1,\dots,p_J\}$: by `sf_aia.md` Eq. (T3b), the frame-mean of the SF-AIA
 coefficients $\bar c_j \equiv \langle c_{jn}\rangle_n$ is, by construction, indistinguishable
-from — and by convention *is* treated as — part of $\phi_{\text{carrier}}$, not the step field.
-So a degree-$M$ carrier removal and a degree-$M$ step-field fit are not independent quantities:
+from — and by convention *is* treated as — part of $\phi_{\text{carrier}}$, not the phase-step error field.
+So a degree-$M$ carrier removal and a degree-$M$ SF-AIA fit are not independent quantities:
 `StepFieldParam.coeffs`, reported un-gauge-fixed per `gauge_conventions.md`, carries a carrier
 piece that a subsequent carrier-removal fit (this document) would remove a second time from
 $\Phi$.
 
-`step_field_residuals.md` §5.4/§11 show an *uncorrected* step field biases the recovered $\Phi$ by
+`sf_aia.md` §5.4/§11 show an *uncorrected* phase-step error field biases the recovered $\Phi$ by
 a ramp plus a second harmonic, and already call the ramp harmless "since that is exactly the
 functional form of $\phi_{\text{carrier}}$" — removed along with it. Sections 2–3 here make that
 claim precise in both directions: at $M\ge1$ the ramp lies in $\operatorname{span}\{p_j\}$ and is
 absorbed into $a_j$ exactly by Eq. (C7), so the fitted carrier coefficients are *not* a clean
-instrumental diagnostic once an uncorrected step field is present upstream. The $2\Phi$-harmonic
+instrumental diagnostic once an uncorrected phase-step error field is present upstream. The $2\Phi$-harmonic
 half of that same bias is **not** in the polynomial span and survives carrier removal untouched.
 
 ## 7. Summary table
@@ -287,7 +287,7 @@ half of that same bias is **not** in the polynomial span and survives carrier re
 ## 8. Assumptions used
 
 1. **A converged solve.** $\Phi(x,y)$ (and, where used, $b(x,y)$/$u,v$) come from a piston-model
-   or step-field-corrected AIA solve already consistent with `interference_model.md` Eq. (17) —
+   AIA or SF-AIA solve already consistent with `interference_model.md` Eq. (17) —
    this document treats $\Phi$ as given data, not as something it re-derives.
 2. **The carrier is genuinely low-order.** $\phi_{\text{carrier}}(x,y)$ (and whatever of
    $\phi,\phi_{\text{inst}}$ is fit alongside it) is well approximated by a degree-$\le M$

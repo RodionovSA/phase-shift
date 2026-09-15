@@ -15,8 +15,8 @@ AIA works on the **uniform-piston limit** of this model (`interference_model.md`
 Eq. 20, $\Delta_n(x, y) \equiv 0$): the phase step from frame to frame must be a
 single scalar $\delta_n$, not a field. If $\Delta_n \not\equiv 0$ in the actual
 data, AIA's recovered $\Phi$ and $b$ carry a systematic, low-order bias that
-does not shrink with more frames — see `docs/step_field_residuals.md` for the
-size of that bias and `phase.methods.step_field.aia_step_field`, which refines
+does not shrink with more frames — see `docs/sf_aia.md` for the
+size of that bias and the SF-AIA method, which refines
 an AIA solution against a spatially-varying step instead of assuming it away.
 
 The per-frame source-power factor $\alpha_n$ is not solved for either: since
