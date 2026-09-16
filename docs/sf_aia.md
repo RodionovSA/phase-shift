@@ -36,7 +36,7 @@ The per-frame fit of the estimator cannot impose this condition, so it is applie
 
 ### Linearization
 
-With the quadrature fields and design-matrix rows of `aia.md` (Eqs. 2, 3, 5), write
+With the quadrature fields and design-matrix rows of `aia.md` (Eqs. 2, 3, 6), write
 
 $$P_n=g_n\cos\delta_n,\qquad Q_n=g_n\sin\delta_n,\qquad u=b\cos\Phi,\qquad v=-b\sin\Phi,\qquad I_n^{(0)}=a+P_nu+Q_nv,\tag{T4}$$
 
@@ -80,7 +80,7 @@ with $\rho_j=\langle g_nc_{jn}e^{i\delta_n}\rangle_n$, $\mu_j=\langle g_n^2c_{jn
 
 ### Pixel-step bias
 
-The pixel step of `aia.md` solves $(a,u,v)^\top=A_p^{-1}A^\top(I_1,\dots,I_N)^\top$, where $A$ is the design matrix of `aia.md`, Eq. (5), with rows $(1,P_n,Q_n)$, and $A_p=A^\top A$. The piston prediction $I_n^{(0)}$ lies in the column space of $A$, so for $I_n=I_n^{(0)}+\Delta I_n^{(1)}$ the solve returns the true fields plus the bias
+The pixel step of `aia.md` solves $(a,u,v)^\top=A_p^{-1}A^\top(I_1,\dots,I_N)^\top$, where $A$ is the design matrix of `aia.md`, Eq. (6), with rows $(1,P_n,Q_n)$, and $A_p=A^\top A$. The piston prediction $I_n^{(0)}$ lies in the column space of $A$, so for $I_n=I_n^{(0)}+\Delta I_n^{(1)}$ the solve returns the true fields plus the bias
 
 $$\begin{pmatrix}\Delta a\\\Delta u\\\Delta v\end{pmatrix}
 =A_p^{-1}A^\top\begin{pmatrix}\Delta I_1^{(1)}\\\vdots\\\Delta I_N^{(1)}\end{pmatrix}.\tag{T10}$$
@@ -148,7 +148,7 @@ Run the AIA solve of `aia.md` to obtain $(a,u,v,\delta_n,g_n)$, and form the res
 
 $$r_n=I_n-\big(a+P_nu+Q_nv\big).$$
 
-When the gain is jointly fitted, $I_n$ is taken net of the per-frame offset of `aia.md`, Eq. (4).
+When the gain is jointly fitted, $I_n$ is taken net of the per-frame offset of `aia.md`, Eq. (7).
 
 By Eq. (T7), $r_n\approx-w_n\Delta_n$ to first order. With $(a,u,v,\delta_n,g_n)$ held at the AIA estimates, $w_n=uQ_n-vP_n$ is known at every pixel, and substituting Eq. (T1) gives a residual model that is linear in the coefficients:
 
