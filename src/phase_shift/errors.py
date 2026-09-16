@@ -1,10 +1,10 @@
-"""Per-pixel phase-error maps for :class:`phase.solver.PhaseResult.phi_error`.
+"""Per-pixel phase-error maps for :class:`phase_shift.result.PhaseResult.phi_error`.
 
 Computed from a method's *output* (``b, phi, delta, g``), not from inside the
 method itself -- see ``docs/aia.md`` "Direct phase-error computation" for the
 derivation (Eq. 21-38) and ``docs/sf_aia.md`` §9 (Eq. E5-E9)
 for the ``aia_step_field``/``aia_tilt`` extension. :func:`compute_phi_error`
-is the single entry point :class:`phase.solver.PhaseSolver` calls; it
+is the single entry point :class:`phase_shift.solver.PhaseSolver` calls; it
 dispatches on ``method`` and currently computes a result for ``"aia"`` and
 ``"aia_step_field"``/``"aia_tilt"`` -- every other registered method gets
 ``None``, since no closed-form error expression has been derived for it.

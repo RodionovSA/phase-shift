@@ -6,7 +6,8 @@ from typing import Optional
 
 import numpy as np
 
-from .backend import get_array_module, to_device, wrap, wrap_add, wrap_sub
+from .backend import get_array_module, to_device
+from .utils import wrap, wrap_add, wrap_sub
 
 
 @dataclass
@@ -76,7 +77,7 @@ def subtract_reference(phi: np.ndarray, phi_ref: np.ndarray,
     Parameters
     ----------
     phi : np.ndarray, shape (H, W)
-        Sample phase map, in ``(-pi, pi]`` (e.g. :attr:`phase.solver.PhaseResult.phi`).
+        Sample phase map, in ``(-pi, pi]`` (e.g. :attr:`phase_shift.result.PhaseResult.phi`).
     phi_ref : np.ndarray, shape (H, W)
         Reference phase map, same shape as ``phi``.
     weight : np.ndarray, shape (H, W), optional

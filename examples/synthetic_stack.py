@@ -3,7 +3,7 @@
 import numpy as np
 
 from phase_shift import PhaseConfig, PhaseSolver
-from phase_shift.backend import wrap
+from phase_shift.utils import wrap
 
 
 def main():
@@ -19,11 +19,11 @@ def main():
     # branches after aligning their constant offset to the known truth.
     errors = []
     for sign in (1, -1):
-        difference = wrap(sign * solver.phi_ - phase)
+        difference = wrap(sign * solver.result.phi - phase)
         piston = np.angle(np.mean(np.exp(1j * difference)))
         errors.append(np.sqrt(np.mean(wrap(difference - piston) ** 2)))
-    print(f"Phase shape: {solver.phi_.shape}")
-    print(f"Reconstruction RMSE: {solver.reconstruction_error_:.6g}")
+    print(f"Phase shape: {solver.result.phi.shape}")
+    print(f"Reconstruction RMSE: {solver.result.reconstruction_error:.6g}")
     print(f"Aligned phase RMS: {min(errors):.6g} rad")
 
 

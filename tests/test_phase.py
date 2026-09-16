@@ -1,7 +1,7 @@
-"""Fast unit tests for `phase`, on small synthetic stacks (no data/ files needed).
+"""Fast unit tests for `phase_shift`, on small synthetic stacks (no data/ files needed).
 
 These exist to catch regressions in seconds during the CPU<->GPU backend
-work (see phase/backend.py) without loading the ~1.5 GB real acquisitions in
+work (see src/phase_shift/backend.py) without loading the ~1.5 GB real acquisitions in
 data/ -- run with real data (scripts/test/*.ipynb) remains the authority on
 physical correctness; these check the math and the numpy/cupy dispatch.
 """
@@ -9,7 +9,7 @@ physical correctness; these check the math and the numpy/cupy dispatch.
 import numpy as np
 import pytest
 
-from phase import (
+from phase_shift import (
     PhaseConfig,
     PhaseSolver,
     apply_phase_ripple,
@@ -19,8 +19,9 @@ from phase import (
     remove_carrier,
     subtract_reference,
 )
-from phase.backend import CUPY_AVAILABLE, wrap
-from phase.methods.sf_aia import _poly_basis, step_field_quality
+from phase_shift.backend import CUPY_AVAILABLE
+from phase_shift.utils import wrap
+from phase_shift.methods.sf_aia import _poly_basis, step_field_quality
 
 
 def circ_rms_deg(a: np.ndarray, b: np.ndarray) -> float:
@@ -105,13 +106,10 @@ class TestPhaseConfig:
         with pytest.raises(ValueError):
             PhaseConfig(gain_mode="fft")
 
-    def test_from_yaml_rejects_removed_gain_fields(self, tmp_path):
-        # use_g/dc_radius/halfwin/frame_chunk configured the retired
-        # FFT-based gain estimator; a config file written for it must fail
-        # loudly rather than silently change meaning under gain_mode.
-        p = tmp_path / "old_config.yaml"
+    def test_from_yaml_rejects_unknown_keys(self, tmp_path):
+        p = tmp_path / "config.yaml"
         p.write_text("use_g: false\ndc_radius: 8\n")
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError):
             PhaseConfig.from_yaml(p)
 
     def test_yaml_roundtrip(self, tmp_path):
@@ -133,12 +131,12 @@ class TestAIA:
         # supply the exact known gain (PhaseConfig(g=...)) to isolate the
         # AIA solve's accuracy from gain-estimation accuracy.
         solver = PhaseSolver(PhaseConfig(g=truth["g"])).fit(stack)
-        assert solver.method_param_.converged
+        assert solver.result.method_param.converged
         # aia has an exact (phi, delta) -> (-phi, -delta) sign ambiguity
         # (I_n = a + b*cos(phi+delta_n) is invariant under it) -- accept
         # either branch.
-        err_same = circ_rms_deg(solver.phi_, truth["phi"])
-        err_flip = circ_rms_deg(solver.phi_, -truth["phi"])
+        err_same = circ_rms_deg(solver.result.phi, truth["phi"])
+        err_flip = circ_rms_deg(solver.result.phi, -truth["phi"])
         assert min(err_same, err_flip) < 0.5
 
     def test_dtype_float32_close_to_float64(self):
@@ -148,13 +146,13 @@ class TestAIA:
         config = PhaseConfig(gain_mode="none")
         r64 = PhaseSolver(config, dtype=np.float64).fit(stack)
         r32 = PhaseSolver(config, dtype=np.float32).fit(stack)
-        assert circ_rms_deg(r32.phi_, r64.phi_) < 1e-2
-        assert r32.method_param_.iters_run == r64.method_param_.iters_run
-        assert r32.method_param_.converged == r64.method_param_.converged
+        assert circ_rms_deg(r32.result.phi, r64.result.phi) < 1e-2
+        assert r32.result.method_param.iters_run == r64.result.method_param.iters_run
+        assert r32.result.method_param.converged == r64.result.method_param.converged
 
     def test_precise_reduce_false_close_to_true(self):
         # precise_reduce only changes which dtype aia_frame_step's
-        # stack-scale reduction runs in (phase/methods/aia.py) -- the
+        # stack-scale reduction runs in (src/phase_shift/methods/aia.py) -- the
         # recovered phase should be indistinguishable at the same threshold
         # test_dtype_float32_close_to_float64 already uses for a genuine
         # dtype change.
@@ -163,9 +161,9 @@ class TestAIA:
         cfg_fast = PhaseConfig(gain_mode="none", precise_reduce=False)
         r_precise = PhaseSolver(cfg_precise).fit(stack)
         r_fast = PhaseSolver(cfg_fast).fit(stack)
-        assert circ_rms_deg(r_fast.phi_, r_precise.phi_) < 1e-2
-        assert r_fast.method_param_.iters_run == r_precise.method_param_.iters_run
-        assert r_fast.method_param_.converged == r_precise.method_param_.converged
+        assert circ_rms_deg(r_fast.result.phi, r_precise.result.phi) < 1e-2
+        assert r_fast.result.method_param.iters_run == r_precise.result.method_param.iters_run
+        assert r_fast.result.method_param.converged == r_precise.result.method_param.converged
 
     def test_gain_auto_matches_supplied_gain_ranking(self):
         stack, truth = make_stack(seed=1)
@@ -177,7 +175,7 @@ class TestAIA:
 
     def test_fit_gain_false_returns_g_unchanged(self):
         stack, truth = make_stack(seed=6)
-        from phase.methods.aia import aia
+        from phase_shift.methods.aia import aia
         a, b, phi, delta, g_out, mp = aia(stack, truth["g"], fit_gain=False)
         assert np.array_equal(g_out, truth["g"])
         assert np.all(mp.c_fit == 0)
@@ -189,16 +187,16 @@ class TestAIA:
         stack, truth = make_stack(seed=8)
         solver = PhaseSolver(PhaseConfig(gain_mode="joint")).fit(stack)
         g_true_norm = truth["g"] / np.median(truth["g"])
-        assert np.corrcoef(solver.g_, g_true_norm)[0, 1] > 0.99
+        assert np.corrcoef(solver.result.g, g_true_norm)[0, 1] > 0.99
 
     def test_joint_gain_improves_phase_accuracy_under_gain_drift(self):
         stack, truth = make_stack(seed=9)
         r_none = PhaseSolver(PhaseConfig(gain_mode="none")).fit(stack)
         r_joint = PhaseSolver(PhaseConfig(gain_mode="joint")).fit(stack)
-        err_none = min(circ_rms_deg(r_none.phi_, truth["phi"]),
-                        circ_rms_deg(r_none.phi_, -truth["phi"]))
-        err_joint = min(circ_rms_deg(r_joint.phi_, truth["phi"]),
-                         circ_rms_deg(r_joint.phi_, -truth["phi"]))
+        err_none = min(circ_rms_deg(r_none.result.phi, truth["phi"]),
+                        circ_rms_deg(r_none.result.phi, -truth["phi"]))
+        err_joint = min(circ_rms_deg(r_joint.result.phi, truth["phi"]),
+                         circ_rms_deg(r_joint.result.phi, -truth["phi"]))
         assert err_joint < err_none
 
     def test_joint_gain_iteration_is_monotone(self):
@@ -207,7 +205,7 @@ class TestAIA:
         with its public building blocks and checking the residual never
         increases round over round (the c_n-consistency fix, see aia.py).
         """
-        from phase.methods.aia import aia_frame_step, aia_pixel_step
+        from phase_shift.methods.aia import aia_frame_step, aia_pixel_step
 
         stack, _ = make_stack(seed=10, N=14)
         N = stack.shape[0]
@@ -261,7 +259,7 @@ class TestStepField:
                             method_kwargs=dict(degree=2, **kw))
         r1 = PhaseSolver(cfg1).fit(stack)
         r2 = PhaseSolver(cfg2).fit(stack)
-        assert r2.reconstruction_error_ < 0.5 * r1.reconstruction_error_
+        assert r2.result.reconstruction_error < 0.5 * r1.result.reconstruction_error
 
     def test_linear_tilt_recovered_at_degree1(self):
         stack, _ = make_step_field_stack(kind="linear")
@@ -271,7 +269,7 @@ class TestStepField:
                                                     refine_iters=8, refine_tol=1e-8, crop=5))
         r_plain = PhaseSolver(cfg_plain).fit(stack)
         r_tilt = PhaseSolver(cfg_tilt).fit(stack)
-        assert r_tilt.reconstruction_error_ < 0.3 * r_plain.reconstruction_error_
+        assert r_tilt.result.reconstruction_error < 0.3 * r_plain.result.reconstruction_error
 
     def test_linear_tilt_recovered_with_joint_gain(self):
         # Same linear-tilt field as test_linear_tilt_recovered_at_degree1,
@@ -283,8 +281,8 @@ class TestStepField:
                                 method_kwargs=dict(iters=40, tol=1e-6, degree=1,
                                                     refine_iters=8, refine_tol=1e-8, crop=5))
         r_tilt = PhaseSolver(cfg_tilt).fit(stack)
-        assert r_tilt.reconstruction_error_ < 0.05
-        assert np.corrcoef(r_tilt.g_, truth["g"])[0, 1] > 0.99
+        assert r_tilt.result.reconstruction_error < 0.05
+        assert np.corrcoef(r_tilt.result.g, truth["g"])[0, 1] > 0.99
 
     def test_frame_independent_aberration_absorbed_into_phase(self):
         stack, _ = make_step_field_stack(kind="static_quadratic")
@@ -292,7 +290,7 @@ class TestStepField:
                            method_kwargs=dict(iters=40, tol=1e-6, degree=2,
                                                refine_iters=8, refine_tol=1e-8, crop=5))
         r = PhaseSolver(cfg).fit(stack)
-        assert r.reconstruction_error_ < 0.05
+        assert r.result.reconstruction_error < 0.05
 
     def test_aia_tilt_alias_matches_degree1(self):
         stack, _ = make_step_field_stack(kind="linear")
@@ -300,20 +298,20 @@ class TestStepField:
         cfg_alias = PhaseConfig(use_alpha=False, gain_mode="none", method="aia_tilt", method_kwargs=kw)
         cfg_explicit = PhaseConfig(use_alpha=False, gain_mode="none", method="aia_step_field",
                                     method_kwargs=dict(degree=1, **kw))
-        r_alias = PhaseSolver(cfg_alias).fit(stack)
-        r_explicit = PhaseSolver(cfg_explicit).fit(stack)
-        assert r_alias.reconstruction_error_ == pytest.approx(r_explicit.reconstruction_error_)
+        r_alias = PhaseSolver(cfg_alias).fit(stack).result
+        r_explicit = PhaseSolver(cfg_explicit).fit(stack).result
+        assert r_alias.reconstruction_error == pytest.approx(r_explicit.reconstruction_error)
 
     def test_degree0_matches_plain_aia(self):
         stack, _ = make_step_field_stack(kind="quadratic")
         cfg_plain = PhaseConfig(use_alpha=False, gain_mode="none", method="aia")
         cfg_deg0 = PhaseConfig(use_alpha=False, gain_mode="none", method="aia_step_field",
                                 method_kwargs=dict(degree=0, refine_iters=5, crop=5))
-        r_plain = PhaseSolver(cfg_plain).fit(stack)
-        r_deg0 = PhaseSolver(cfg_deg0).fit(stack)
-        mp = r_deg0.method_param_
+        r_plain = PhaseSolver(cfg_plain).fit(stack).result
+        r_deg0 = PhaseSolver(cfg_deg0).fit(stack).result
+        mp = r_deg0.method_param
 
-        assert r_deg0.reconstruction_error_ == pytest.approx(r_plain.reconstruction_error_)
+        assert r_deg0.reconstruction_error == pytest.approx(r_plain.reconstruction_error)
         assert mp.coeffs.shape == (0, stack.shape[0])
         assert mp.refine_iters_run == 0
         assert mp.best_iter == -1
@@ -322,25 +320,25 @@ class TestStepField:
         # Same equivalence check as TestAIA's, for aia_step_field's own
         # stack-scale reductions (aia_frame_step inside the refine loop,
         # step_field_quality's model/resid reconstruction, and its RMS
-        # ratio -- all in phase/methods/sf_aia.py).
+        # ratio -- all in src/phase_shift/methods/sf_aia.py).
         stack, truth = make_step_field_stack(kind="linear", gain_std=0.3)
         kw = dict(iters=40, tol=1e-6, degree=1, refine_iters=8, refine_tol=1e-8, crop=5)
         cfg_precise = PhaseConfig(use_alpha=False, gain_mode="joint", method="aia_step_field",
                                    method_kwargs=kw, precise_reduce=True)
         cfg_fast = PhaseConfig(use_alpha=False, gain_mode="joint", method="aia_step_field",
                                 method_kwargs=kw, precise_reduce=False)
-        r_precise = PhaseSolver(cfg_precise).fit(stack)
-        r_fast = PhaseSolver(cfg_fast).fit(stack)
-        assert circ_rms_deg(r_fast.phi_, r_precise.phi_) < 1e-2
-        assert r_fast.method_param_.rms_frac == pytest.approx(r_precise.method_param_.rms_frac, abs=1e-4)
-        assert np.allclose(r_fast.method_param_.coeffs, r_precise.method_param_.coeffs, atol=1e-3)
-        # method_param_ carries the setting it was solved with, so
+        r_precise = PhaseSolver(cfg_precise).fit(stack).result
+        r_fast = PhaseSolver(cfg_fast).fit(stack).result
+        assert circ_rms_deg(r_fast.phi, r_precise.phi) < 1e-2
+        assert r_fast.method_param.rms_frac == pytest.approx(r_precise.method_param.rms_frac, abs=1e-4)
+        assert np.allclose(r_fast.method_param.coeffs, r_precise.method_param.coeffs, atol=1e-3)
+        # method_param carries the setting it was solved with, so
         # phase_step_field (called generically by PhaseSolver.fit's
         # reconstruction-error check) can honor it too.
-        assert r_precise.method_param_.precise_reduce is True
-        assert r_fast.method_param_.precise_reduce is False
-        assert r_precise.method_param_.work_dtype == r_fast.method_param_.work_dtype == np.float32
-        assert r_fast.reconstruction_error_ == pytest.approx(r_precise.reconstruction_error_, abs=1e-4)
+        assert r_precise.method_param.precise_reduce is True
+        assert r_fast.method_param.precise_reduce is False
+        assert r_precise.method_param.work_dtype == r_fast.method_param.work_dtype == np.float32
+        assert r_fast.reconstruction_error == pytest.approx(r_precise.reconstruction_error, abs=1e-4)
 
     def test_step_field_quality_resid_dtype_matches_precise_reduce(self):
         # step_field_quality's own regression test: resid must be float64
@@ -377,7 +375,7 @@ class TestStepField:
         control flow of the refinement loop is tested in isolation from the
         actual per-frame fit quality.
         """
-        import phase.methods.sf_aia as sf
+        import phase_shift.methods.sf_aia as sf
 
         stack, _ = make_step_field_stack(kind="quadratic", H=16, W=16, N=6)
         rms_seq = iter([0.20, 0.35, 0.19, 0.19])
@@ -390,7 +388,7 @@ class TestStepField:
         cfg = PhaseConfig(use_alpha=False, gain_mode="none", method="aia_step_field",
                            method_kwargs=dict(degree=2, refine_iters=4, refine_tol=1e-3, crop=2))
         r = PhaseSolver(cfg).fit(stack)
-        mp = r.method_param_
+        mp = r.result.method_param
 
         assert mp.rms_frac_history == pytest.approx([0.20, 0.35, 0.19, 0.19])
         assert mp.best_iter == 2
@@ -490,7 +488,7 @@ class TestRipple:
         assert circ_rms_deg(recovered, phi_w) < 1.0
 
 
-class TestBackendWrap:
+class TestWrap:
     def test_wrap_matches_angle_exp(self):
         rng = np.random.default_rng(5)
         x = rng.uniform(-50, 50, 10_000)

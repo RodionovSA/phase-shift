@@ -54,8 +54,8 @@ def combine_acquisitions(phis, weights=None, align_carrier: bool = True,
     not average out within one run, only across independent runs -- unlike
     per-frame model errors (contrast, phase-step), which are systematic
     within a run and need a better model rather than averaging (see
-    :class:`phase.solver.PhaseConfig`'s ``gain_mode`` and
-    :func:`phase.utils.measure_frame_contrast`). Averaging ``k`` independent
+    :class:`phase_shift.config.PhaseConfig`'s ``gain_mode`` and
+    :func:`phase_shift.frame_contrast.measure_frame_contrast`). Averaging ``k`` independent
     acquisitions brings this random component down as the expected
     ``1/sqrt(k)``.
 
@@ -88,13 +88,13 @@ def combine_acquisitions(phis, weights=None, align_carrier: bool = True,
     ----------
     phis : sequence of np.ndarray, each shape (H, W)
         Independently recovered phase maps of the *same* object (e.g. one
-        per repeated scan). Pass :attr:`phase.solver.PhaseResult.phi` from
-        separate :meth:`~phase.solver.PhaseSolver.fit` calls -- fit one
+        per repeated scan). Pass :attr:`phase_shift.result.PhaseResult.phi` from
+        separate :meth:`~phase_shift.solver.PhaseSolver.fit` calls -- fit one
         stack at a time and keep only ``phi``/``b``, rather than holding
         every raw stack in memory at once.
     weights : sequence of np.ndarray, each shape (H, W), optional
         Per-acquisition, per-pixel reliability (e.g. each acquisition's
-        :attr:`phase.solver.PhaseResult.b`). Used both for the
+        :attr:`phase_shift.result.PhaseResult.b`). Used both for the
         carrier-removal step and the final weighted circular mean. Defaults
         to uniform weight.
     align_carrier : bool, default True

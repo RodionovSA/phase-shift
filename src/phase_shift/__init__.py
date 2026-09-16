@@ -2,12 +2,14 @@
 
 Public API, re-exported here regardless of which submodule a name lives in:
 
-- :mod:`phase.solver` -- ``PhaseSolver``, ``PhaseConfig``, ``PhaseResult``,
-  ``MethodParam``, ``METHODS``: the primary entry point. Configure a
-  ``PhaseSolver`` with a ``PhaseConfig`` (which algorithm to run and how)
-  and call ``.fit(stack)`` to recover phase; see :class:`phase.solver.PhaseResult`
-  for the recovered fields.
-- :mod:`phase.utils` -- ``measure_frame_contrast``, ``measure_frame_visibility``
+- :mod:`phase.solver`, :mod:`phase.config`, :mod:`phase.result` --
+  ``PhaseSolver``, ``PhaseConfig``, ``PhaseResult``: the primary entry point.
+  Configure a ``PhaseSolver`` with a ``PhaseConfig`` (which algorithm to run
+  and how) and call ``.fit(stack)`` to recover phase; see
+  :class:`phase.result.PhaseResult` for the recovered fields.
+- :mod:`phase.methods` -- ``METHODS``, ``MethodParam``
+- :mod:`phase.interference_model` -- ``model_stack``
+- :mod:`phase.frame_contrast` -- ``measure_frame_contrast``, ``measure_frame_visibility``
 - :mod:`phase.carrier` -- ``remove_carrier``, ``CarrierResult``
 - :mod:`phase.reference` -- ``subtract_reference``, ``DifferenceResult``
 - :mod:`phase.ripple` -- ``estimate_phase_ripple``, ``apply_phase_ripple``,
@@ -26,8 +28,12 @@ from .carrier import CarrierResult, remove_carrier
 from .combine import CombinedResult, combine_acquisitions
 from .reference import DifferenceResult, subtract_reference
 from .ripple import RippleResult, apply_phase_ripple, estimate_phase_ripple
-from .solver import MethodParam, METHODS, PhaseConfig, PhaseResult, PhaseSolver
-from .utils import measure_frame_contrast, measure_frame_visibility
+from .config import PhaseConfig
+from .frame_contrast import measure_frame_contrast, measure_frame_visibility
+from .interference_model import model_stack
+from .methods import METHODS, MethodParam
+from .result import PhaseResult
+from .solver import PhaseSolver
 
 __all__ = [
     "PhaseSolver",
@@ -35,6 +41,7 @@ __all__ = [
     "PhaseResult",
     "MethodParam",
     "METHODS",
+    "model_stack",
     "measure_frame_contrast",
     "measure_frame_visibility",
     "CarrierResult",

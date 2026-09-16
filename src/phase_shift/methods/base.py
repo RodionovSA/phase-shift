@@ -9,21 +9,18 @@ of from ``phase.solver`` avoids a circular import.
 
 from dataclasses import dataclass, fields
 
-
-def _fmt_value(value) -> str:
-    """Format a diagnostic value: 6 significant figures for floats, ``str`` otherwise."""
-    return f"{value:.6g}" if isinstance(value, float) else str(value)
+from ..utils import format_value
 
 
 @dataclass
 class MethodParam:
     """Base marker type for a method's per-fit diagnostics.
 
-    Each entry in :data:`phase.solver.METHODS` returns its own subclass
+    Each entry in :data:`phase_shift.methods.METHODS` returns its own subclass
     (e.g. ``aia`` returns :class:`phase.methods.aia.AIAParam`) carrying
     whatever diagnostics are specific to that algorithm (convergence,
     condition numbers, ...). Stored on
-    :attr:`phase.solver.PhaseResult.method_param`.
+    :attr:`phase_shift.result.PhaseResult.method_param`.
     """
 
     def print_summary(self) -> None:
@@ -34,7 +31,7 @@ class MethodParam:
         :meth:`phase.methods.aia.AIAParam.print_summary`).
         """
         for f in fields(self):
-            print(f"{f.name}: {_fmt_value(getattr(self, f.name))}")
+            print(f"{f.name}: {format_value(getattr(self, f.name))}")
 
     def phase_step_field(self, delta, H, W, xp):
         """Full per-pixel, per-frame phase-step field for reconstructing Eq. (8).
@@ -42,7 +39,7 @@ class MethodParam:
         Default: ``delta`` is spatially uniform (the piston model), so this
         just broadcasts it to ``(N, H, W)``. A method whose recovered phase
         step varies spatially (e.g. a per-frame tilt) overrides this --
-        :meth:`phase.solver.PhaseSolver.fit`'s method-agnostic
+        :meth:`phase_shift.solver.PhaseSolver.fit`'s method-agnostic
         reconstruction-error check calls this instead of assuming ``delta``
         broadcasts directly, so a new method needs only override this to be
         handled there (see

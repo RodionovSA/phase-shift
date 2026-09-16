@@ -5,8 +5,9 @@ from typing import Optional
 
 import numpy as np
 
-from .backend import get_array_module, to_device, wrap
+from .backend import get_array_module, to_device
 from .carrier import remove_carrier
+from .utils import wrap
 
 
 @dataclass
@@ -55,8 +56,8 @@ def estimate_phase_ripple(phi: np.ndarray, mask: np.ndarray,
     deterministic function of the recovered phase itself, ``eps(phi)``,
     rather than of position -- the signature of an imperfect frame model
     (e.g. per-frame contrast treated as constant when it isn't; see
-    :class:`phase.solver.PhaseConfig`'s ``gain_mode`` and
-    :func:`phase.utils.measure_frame_contrast`). Because it tracks phase,
+    :class:`phase_shift.config.PhaseConfig`'s ``gain_mode`` and
+    :func:`phase_shift.frame_contrast.measure_frame_contrast`). Because it tracks phase,
     not position, it doesn't average out spatially
     and isn't separable from real structure by a spatial filter (e.g. FFT)
     when the two overlap in spatial frequency -- but it *is* separable in
@@ -85,7 +86,7 @@ def estimate_phase_ripple(phi: np.ndarray, mask: np.ndarray,
     ----------
     phi : np.ndarray, shape (H, W)
         Wrapped phase map to estimate the ripple from (e.g.
-        :attr:`phase.solver.PhaseResult.phi`, *before* carrier removal).
+        :attr:`phase_shift.result.PhaseResult.phi`, *before* carrier removal).
     mask : np.ndarray, shape (H, W)
         Boolean (or 0/1) map selecting the known-flat region (e.g. thresholded
         modulation map, or a hand-drawn ROI excluding the structure).

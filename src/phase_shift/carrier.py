@@ -343,10 +343,10 @@ def remove_carrier(phi: np.ndarray, weight: Optional[np.ndarray] = None,
     Parameters
     ----------
     phi : np.ndarray, shape (H, W)
-        Wrapped phase map, in ``(-pi, pi]`` (e.g. :attr:`phase.solver.PhaseResult.phi`).
+        Wrapped phase map, in ``(-pi, pi]`` (e.g. :attr:`phase_shift.result.PhaseResult.phi`).
     weight : np.ndarray, shape (H, W), optional
         Per-pixel reliability used only for *estimating* the carrier (e.g.
-        :attr:`phase.solver.PhaseResult.b`, the modulation map) --
+        :attr:`phase_shift.result.PhaseResult.b`, the modulation map) --
         down-weights noisy, low-modulation pixels so they don't bias the
         fit. Negative values are clipped to 0. Does not affect the returned
         ``phi``, which is always computed from the unweighted field.

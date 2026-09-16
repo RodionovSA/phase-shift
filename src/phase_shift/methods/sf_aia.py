@@ -17,8 +17,9 @@ import numpy as np
 
 from .. import backend as _backend
 from ..backend import get_array_module
+from ..utils import format_value
 from .aia import AIAParam, _aia_diagnostics, _whiten_uv, aia, aia_frame_step, aia_pixel_step
-from .base import MethodParam, _fmt_value
+from .base import MethodParam
 
 
 @lru_cache(maxsize=32)
@@ -223,7 +224,7 @@ def step_field_quality(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.nd
         Pixels excluded from each edge of the field before computing either
         RMS. ``crop=0`` compares over the full field.
     precise_reduce : bool, default True
-        See :attr:`phase.solver.PhaseConfig.precise_reduce`. Controls the
+        See :attr:`phase_shift.config.PhaseConfig.precise_reduce`. Controls the
         dtype of every operand feeding the ``(N, P)`` reconstruction below,
         and hence of the returned ``resid`` itself.
 
@@ -339,9 +340,9 @@ class StepFieldParam(MethodParam):
         taken from -- not necessarily the last one run. ``-1`` if
         ``refine_iters=0``.
     precise_reduce : bool
-        See :attr:`phase.solver.PhaseConfig.precise_reduce`. Carried here
+        See :attr:`phase_shift.config.PhaseConfig.precise_reduce`. Carried here
         (not just as a call argument) so :meth:`phase_step_field`, called
-        generically by :meth:`phase.solver.PhaseSolver.fit`, can honor it.
+        generically by :meth:`phase_shift.solver.PhaseSolver.fit`, can honor it.
     work_dtype
         The working dtype ``aia_step_field`` actually solved in -- what
         :meth:`phase_step_field` casts down to when ``precise_reduce`` is
@@ -364,19 +365,19 @@ class StepFieldParam(MethodParam):
     def print_summary(self) -> None:
         """Delegate to the inner AIAParam, then print the refinement diagnostics."""
         self.aia_param.print_summary()
-        print(f"degree:           {_fmt_value(self.degree)}")
-        print(f"refine_converged: {_fmt_value(self.refine_converged)}")
-        print(f"refine_iters_run: {_fmt_value(self.refine_iters_run)}")
-        print(f"best_iter:        {_fmt_value(self.best_iter)}")
-        print(f"rms_frac:         {_fmt_value(self.rms_frac)}")
-        print(f"kappa_fit:        {_fmt_value(self.kappa_fit)}")
-        print(f"coeffs_rms:       {_fmt_value(self.coeffs_rms)}")
+        print(f"degree:           {format_value(self.degree)}")
+        print(f"refine_converged: {format_value(self.refine_converged)}")
+        print(f"refine_iters_run: {format_value(self.refine_iters_run)}")
+        print(f"best_iter:        {format_value(self.best_iter)}")
+        print(f"rms_frac:         {format_value(self.rms_frac)}")
+        print(f"kappa_fit:        {format_value(self.kappa_fit)}")
+        print(f"coeffs_rms:       {format_value(self.coeffs_rms)}")
 
     def phase_step_field(self, delta, H, W, xp):
         """Piston ``delta_n`` plus the fitted per-frame step field ``coeffs[:,n] @ basis``.
 
         Overrides :meth:`phase.methods.base.MethodParam.phase_step_field`'s
-        plain broadcast so :meth:`phase.solver.PhaseSolver.fit`'s
+        plain broadcast so :meth:`phase_shift.solver.PhaseSolver.fit`'s
         reconstruction check sees the spatially-varying phase step this
         method recovers. Honors ``self.precise_reduce`` exactly as
         :func:`step_field_quality` does (float64 vs. ``self.work_dtype``).
@@ -443,7 +444,7 @@ def aia_step_field(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
         Pixels excluded from each edge of the field when computing
         ``rms_frac`` (see :func:`step_field_quality`).
     precise_reduce : bool, default True
-        See :attr:`phase.solver.PhaseConfig.precise_reduce`. Forwarded to
+        See :attr:`phase_shift.config.PhaseConfig.precise_reduce`. Forwarded to
         the initial ``aia`` call and to every ``aia_frame_step``/
         ``step_field_quality`` call in the refinement loop below.
 

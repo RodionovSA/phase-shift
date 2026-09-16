@@ -13,20 +13,24 @@ known.
 ## Project structure
 
 - `src/phase_shift/` — phase-processing library.
-  - `solver.py` — `PhaseSolver`/`PhaseConfig`/`PhaseResult`: the main entry
-    point. Configure a `PhaseConfig` (which algorithm to run and how) and
-    call `PhaseSolver(config).fit(stack)` to recover phase.
+  - `solver.py` — `PhaseSolver`, the main entry point. Call
+    `PhaseSolver(config).fit(stack)` to recover phase.
+  - `config.py` — `PhaseConfig`: which algorithm to run and how, with YAML
+    save/load.
+  - `result.py` — `PhaseResult`: the recovered fields, `solver.result`.
+  - `interference_model.py` — `model_stack`, the frame stack of the
+    interference model evaluated from its fields.
   - `methods/` — one module per phase-recovery algorithm, registered in
-    `methods/__init__.py`'s `METHOD_REGISTRY` (`phase_shift.solver.METHODS` is
-    derived from it). `aia.py` — an Advanced Iterative Algorithm
+    `methods/__init__.py`'s `METHOD_REGISTRY` (`phase_shift.METHODS` lists
+    its names). `aia.py` — an Advanced Iterative Algorithm
     implementation for blind phase-shift extraction (Wang & Han 2004;
     enhanced per Chen & Kemao, *Optics Express* 27(26), 37634-37651, 2019).
     `sf_aia.py` — Spatial-Field AIA (SF-AIA), implemented by `aia_step_field`,
     refining that solve against an
     arbitrary-degree spatially-varying phase-step error (`degree=1` is a
     pure linear tilt, registered separately as `"aia_tilt"`).
-  - `utils.py` — `measure_frame_contrast`/`measure_frame_visibility`,
-    per-frame fringe-gain estimation shared by every method.
+  - `frame_contrast.py` — `measure_frame_contrast`/`measure_frame_visibility`,
+    per-frame fringe gain and visibility estimated from the spatial carrier.
   - `carrier.py` — `remove_carrier`, estimating/removing a spatial
     carrier and (optionally) defocus from a wrapped phase map.
   - `reference.py` — `subtract_reference`, resolving the phase sign-branch
@@ -37,6 +41,8 @@ known.
     a phase-locked error `eps(phi)`.
   - `backend.py` — NumPy/CuPy array-module dispatch shared by all of the
     above (see GPU section below).
+  - `utils.py` — `wrap`/`wrap_add`/`wrap_sub` phase wrapping and `format_value`,
+    shared helpers.
 - `docs/interference_model.md` — the interferometry model (Eq. 8) every
   module in `src/phase_shift/` is written against.
 - `docs/sf_aia.md` — Spatial-Field AIA (SF-AIA), the method that uses AIA
@@ -80,32 +86,33 @@ from phase_shift import PhaseSolver, PhaseConfig
 # stack: np.ndarray, shape (N, H, W) — N phase-shifted interferogram frames
 solver = PhaseSolver(PhaseConfig()).fit(stack)
 
-phi = solver.phi_   # wrapped phase map, (H, W), in (-pi, pi]
-b   = solver.b_     # fringe modulation amplitude map, (H, W)
-a   = solver.a_     # background intensity map, (H, W)
+phi = solver.result.phi   # wrapped phase map, (H, W), in (-pi, pi]
+b   = solver.result.b     # fringe modulation amplitude map, (H, W)
+a   = solver.result.a     # background intensity map, (H, W)
 
-print(solver.reconstruction_error_)      # RMSE of the fit, method-agnostic
-print(solver.method_param_)              # diagnostics specific to the method used
+print(solver.result.reconstruction_error)      # RMSE of the fit, method-agnostic
+print(solver.result.method_param)              # diagnostics specific to the method used
 ```
 
 `PhaseConfig` selects and configures the algorithm (`method="aia"` by
-default; see `phase_shift.solver.METHODS` for what's registered) and controls the
+default; see `phase_shift.METHODS` for what's registered) and controls the
 shared normalization/gain steps (`use_alpha`, `gain_mode`, `g`) —
 `gain_mode="joint"` (the default) fits each frame's fringe contrast jointly
 with its phase step inside the method's own iteration, making no
 assumption about the fringe pattern's spatial frequency (unlike the older
-FFT-based `phase_shift.utils.measure_frame_contrast`, which needs a linear
+FFT-based `phase_shift.frame_contrast.measure_frame_contrast`, which needs a linear
 spatial carrier and fails on circular or otherwise carrier-free fringes);
 `gain_mode="none"` fixes every frame's gain at 1, and passing `g` directly
 uses it as a fixed value regardless of `gain_mode`.
-`solver.method_param_` carries whatever diagnostics that method reports —
+`solver.result.method_param` carries whatever diagnostics that method reports —
 for `"aia"`, an `AIAParam` with `kappa_p`/`kappa_ps` (condition-number
 diagnostics from Chen & Kemao 2019: large values flag a poorly conditioned
 acquisition whose result shouldn't be trusted, even if `converged` is
 `True`), `predicted_rms` (the paper's predicted phase error in radians),
 `iters_run`, `converged`, and (when `gain_mode="joint"`) `g_fit`/`c_fit`/
-`g_min_ratio` describing the joint-gain fit. See `src/phase_shift/solver.py` and
-`src/phase_shift/methods/aia.py` for full parameter/field documentation.
+`g_min_ratio` describing the joint-gain fit. See `src/phase_shift/config.py`,
+`src/phase_shift/result.py`, and `src/phase_shift/methods/aia.py` for full
+parameter/field documentation.
 
 ## GPU (CuPy)
 

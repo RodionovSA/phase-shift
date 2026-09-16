@@ -1,4 +1,4 @@
-"""Registry of phase-recovery method implementations for :class:`phase.solver.PhaseSolver`.
+"""Registry of phase-recovery method implementations for :class:`phase_shift.solver.PhaseSolver`.
 
 Each entry maps a method name to a callable
 ``(stack, g, fit_gain=False, dtype=None, **method_kwargs) -> (a, b, phi, delta, g, method_param)``,
@@ -7,7 +7,7 @@ input ``g`` passed through unchanged when ``fit_gain=False``, or the
 per-frame contrast jointly recovered alongside ``delta`` (normalized to
 ``median(g) = 1``) when ``fit_gain=True`` -- see :func:`phase.methods.aia.aia`
 for the reference implementation. Add a method by writing such a function in
-its own module here and registering it below -- :data:`phase.solver.METHODS`
+its own module here and registering it below -- :data:`phase_shift.methods.METHODS`
 is derived from this dict's keys, nothing else changes.
 """
 
@@ -22,3 +22,5 @@ METHOD_REGISTRY = {
     # existing configs/notebooks written against the old name keep working.
     "aia_tilt": aia_step_field,
 }
+
+METHODS = list(METHOD_REGISTRY)

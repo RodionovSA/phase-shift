@@ -7,8 +7,9 @@ from typing import Optional, Tuple
 import numpy as np
 
 from .. import backend as _backend
-from ..backend import get_array_module, wrap
-from .base import MethodParam, _fmt_value
+from ..backend import get_array_module
+from ..utils import format_value, wrap
+from .base import MethodParam
 
 
 @dataclass
@@ -67,11 +68,11 @@ class AIAParam(MethodParam):
 
     def print_summary(self) -> None:
         """Print converged, kappa_p, kappa_ps, predicted_rms, g_min_ratio -- in that order, one per line."""
-        print(f"converged:     {_fmt_value(self.converged)}")
-        print(f"kappa_p:       {_fmt_value(self.kappa_p)}")
-        print(f"kappa_ps:      {_fmt_value(self.kappa_ps)}")
-        print(f"predicted_rms: {_fmt_value(self.predicted_rms)}")
-        print(f"g_min_ratio:   {_fmt_value(self.g_min_ratio)}")
+        print(f"converged:     {format_value(self.converged)}")
+        print(f"kappa_p:       {format_value(self.kappa_p)}")
+        print(f"kappa_ps:      {format_value(self.kappa_ps)}")
+        print(f"predicted_rms: {format_value(self.predicted_rms)}")
+        print(f"g_min_ratio:   {format_value(self.g_min_ratio)}")
 
 
 def _cond3(M, xp):
@@ -333,7 +334,7 @@ def aia_frame_step(stack: np.ndarray, u: np.ndarray, v: np.ndarray,
 
     Returned ``delta`` is absolute (not pinned to a phase origin) and ``g``
     is unnormalized -- a caller iterating on ``delta`` or wanting
-    ``median(g) = 1`` (see :attr:`phase.solver.PhaseResult.g`) must do so
+    ``median(g) = 1`` (see :attr:`phase_shift.result.PhaseResult.g`) must do so
     itself.
 
     Parameters
@@ -343,7 +344,7 @@ def aia_frame_step(stack: np.ndarray, u: np.ndarray, v: np.ndarray,
     u, v : np.ndarray, shape (P,)
         Quadrature components, e.g. as returned by :func:`aia_pixel_step`.
     precise_reduce : bool, default True
-        See :attr:`phase.solver.PhaseConfig.precise_reduce`.
+        See :attr:`phase_shift.config.PhaseConfig.precise_reduce`.
 
     Returns
     -------
@@ -409,14 +410,14 @@ def aia(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
     ----------
     stack : np.ndarray, shape (N, H, W)
         Phase-shifted interferogram frames, already alpha-normalized and on
-        the target device (:meth:`phase.solver.PhaseSolver.fit` does both).
+        the target device (:meth:`phase_shift.solver.PhaseSolver.fit` does both).
     g : np.ndarray, shape (N,)
         Per-frame fringe contrast. Fixed when ``fit_gain=False``, initial
         guess when ``fit_gain=True``.
     fit_gain : bool, default False
         Recover ``g_n`` jointly with ``delta_n`` instead of holding it
         fixed. Prefer this over an out-of-band estimate (e.g.
-        :func:`phase.utils.measure_frame_contrast`, which needs a spatial
+        :func:`phase_shift.frame_contrast.measure_frame_contrast`, which needs a spatial
         carrier and fails on circular/carrier-free fringes) whenever
         contrast drifts frame-to-frame.
     delta0 : np.ndarray, shape (N,), optional
@@ -434,7 +435,7 @@ def aia(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
         per-iteration linear algebra always runs in float64 regardless of
         this setting.
     precise_reduce : bool, default True
-        See :attr:`phase.solver.PhaseConfig.precise_reduce`.
+        See :attr:`phase_shift.config.PhaseConfig.precise_reduce`.
 
     Returns
     -------
