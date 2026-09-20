@@ -11,3 +11,4 @@ htmlcov/
 .DS_Store
 docs/.obsidian/
 data/
+.claude

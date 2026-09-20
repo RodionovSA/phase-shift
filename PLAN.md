@@ -1,204 +1,227 @@
-# Restructuring plan: `src/phase_shift/methods`
+# Plan: exact phase-error model, gauge unification, docs, tests
 
-Bring `methods/` to `src/phase_shift/AGENTS.md`: one method per module, shared
-topics in their own modules, module and function structure mirroring the docs.
+The `methods/` restructure is done and committed (`702cff2`, `08e21ba`). This
+plan covers the phase-error work that followed, plus the gauge unification and
+the documentation and test gaps the restructure exposed.
 
-## Ground rules
+**Direction.** `PhaseResult.phi_error` is computed from the *exact* covariance
+forms, for every method. The asymptotic and averaged forms stay in the
+documents as analysis, each with the conditions under which it is valid,
+rather than as the basis of a computed error.
 
-- Every step preserves results **bit-identically**. Each step is verified by
-  comparing against the `git show HEAD:` version of the touched modules on
-  synthetic stacks, field by field, plus `pytest tests/`.
-- One step at a time; summary and test report after each, then wait for
-  approval before the next.
-- Mathematics comes from `docs/`. No equation is changed by this plan; only
-  where code lives, what it is called, and how it is documented.
+Each document already separates the two, and each stops at the same place:
 
-## Decisions taken
+| method | exact form | approximation | missing |
+|---|---|---|---|
+| AIA | Eq. (26) pixel, Eq. (36) step | Eq. (29), (30), (37), (40); (38)/(41) | exact `sigma_g_n^2`; exact `sigma_Phi^2` for fitted steps (Stages 2, 3) |
+| SF-AIA | Eq. (E7) | Eq. (E8), `1 + J/(4*N_p)` | fitted `P_n`, `Q_n` |
+| VP-AIA | Eq. (29) | Eq. (30), `1 + J/K` | fitted `P_n`, `Q_n` |
 
-1. **Error model moves onto `MethodParam`.** Each method owns its phase-error
-   model as a `MethodParam` method, mirroring `phase_step_field`. `errors.py`
-   keeps the shared derivations; the method-name dispatch goes away.
-2. **`"sf_aia"` replaces `"aia_step_field"`; the `"aia_tilt"` alias is dropped.**
-   Registry keys become `"aia"` and `"sf_aia"`, matching `docs/sf_aia.md` and
-   the module name. Configs naming the old keys must be updated.
-3. **VP-AIA is not implemented here.** `docs/vp_aia.md` gets its own plan
-   afterwards, built on the shared modules this plan creates.
-4. **Building blocks stay public** and are re-exported from
-   `phase_shift.methods`; `spatial_basis` is re-exported from the package root.
-5. **The spatial basis is a family, not a function.** `basis.py` holds a
-   registry of basis families with the gauge conditions applied in one place,
-   so a new family is one registered builder and no change to any method.
+Both field-fitting methods state that they "treat `P_n`, `Q_n` as exact; the
+noise of their estimates is not included here", deferring it to `aia.md` —
+which supplies it only through the Stage-2/3 asymptotics this plan cannot
+validate. So the exact fitted-step covariance of step 2 is the missing piece
+for all three, and each method's error is then that term composed with its own
+field-fit term.
 
-## Target layout
+## Validation status
 
-| Module | Contents | Doc |
+Monte Carlo against the document, all with `delta`/`g` held at the truth so
+each formula is tested on its own terms:
+
+| Equation | what it gives | measured / predicted |
 |---|---|---|
-| `methods/base.py` | `MethodParam`: `print_summary`, `phase_step_field`, `phi_error` | `interference_model.md` Eq. (17)/(20) |
-| `methods/steps.py` | `pixel_step`, `frame_step`, `_pixel_design` | `aia.md` §"Pixel step", §"Frame step" |
-| `methods/gauge.py` | `whiten_uv`, `pin_phase_origin`, `normalize_gain`, `center_offsets`, `center_coeffs` | `gauge_conventions.md`; `sf_aia.md` Eq. (E4); `vp_aia.md` §"Gauge conventions" |
-| `methods/diagnostics.py` | `AIAParam`, `aia_diagnostics`, `chunked_sigma`, `cond2` | `aia.md` §"Accuracy diagnostics" |
-| `methods/aia.py` | `aia` | `aia.md` |
-| `methods/sf_aia.py` | `aia_step_field`, `fit_step_field`, `step_field_quality`, `StepFieldParam` | `sf_aia.md` |
-| `basis.py` (root) | `spatial_basis`, `BASIS_REGISTRY`, `BASES`, one builder per family | `interference_model.md` Eq. (9a)/(9b); `sf_aia.md` §1.2(i), Eq. (T1)/(T3); `vp_aia.md` Eq. (13) |
-| `errors.py` (root) | shared phase-error derivations, no dispatch | `aia.md` Eq. (22)/(34)/(38); `sf_aia.md` Eq. (E9) |
+| (26) | `sigma_Phi^2`, `sigma_b^2` per pixel | 0.9993, 0.9999 |
+| (27) | `b^2 sigma_Phi^2 + sigma_b^2 = tr(C^-1) sigma^2/N` | 0.9997 |
+| (29) | pixel-averaged `sigma_Phi^2` | 0.9999 |
+| (30) | ideal case `sqrt(2/N) sigma/b` | 1.0007 |
+| (35) | `Cov(c_n, P_n, Q_n)` | within 1% |
+| (36) | `sigma_delta_n^2` | 0.9996 |
+| (37) | isotropic `sigma_delta_n^2` | 1.0000 at >= 1 fringe |
 
-Import direction stays one-way: `solver` → `methods` → shared modules →
-`backend`. No method module imports another method module.
+Every exactly testable statement in §"Phase-error covariance" holds, and
+`errors.py`'s `simplified=True` path reproduces Eq. (26) to 0.1%.
 
-## Why this split
+**Withdrawn.** The earlier finding that Eq. (38)/(41) have the wrong sign is
+*not supported*. Those measurements compared the mean squared error about the
+true `delta`, not a variance about the estimator's own mean. The frame step's
+`delta_n` carries a bias of `1-5e-4` rad in that configuration — `bias^2` up to
+0.43 of the variance — which inflated the comparison by 29% where Eq. (36) is
+in fact correct to 0.04%. A `1/N_p` effect is far smaller than that artefact.
 
-`sf_aia.py` currently imports `AIAParam`, `_aia_diagnostics`, `_whiten_uv`,
-`aia_pixel_step` and `aia_frame_step` from `aia.py`, and `errors.py` imports
-`_poly_basis` from `sf_aia.py` — both banned by AGENTS §Structure, which names
-"gauge fixing, error computation, polynomial bases" as the shared topics it
-expects. `docs/vp_aia.md` needs the same five: its algorithm step 1 is the
-pixel step, whitening and frame step with normalizations 1–4, and its Eq. (13)
-spatial modes carry SF-AIA's zero-spatial-mean/zero-frame-mean conventions.
+## Step 1. Re-measure Stages 2 and 3 correctly
 
-## Steps
+Variance about each estimator's own mean, with the bias reported separately
+rather than folded in, and the global phase mode handled identically in both
+arms. Sizes from `N_p = 256` up to where the coefficient stabilises — Stage 3
+was still 18% from its asymptote at `N_p = 144`, so the small fields used
+before are unusable for this.
 
-### 1. `methods/diagnostics.py`
+Deliverable: `k` with an error bar for Stage 2 and Stage 3, and a separate
+statement of the bias, which matters for an MSE-based error budget even though
+Eq. (36) is a variance.
 
-Move `AIAParam`, `_aia_diagnostics` → `aia_diagnostics`, `_chunked_sigma` →
-`chunked_sigma`. Replace `_cond3` (aia) and `_cond_batch` (sf_aia) with one
-`cond2` handling both a single matrix and a batch. `aia.py` and `sf_aia.py`
-import from here. Pure move; no caller-visible change.
+## Step 2. Derive the missing exact formulas for Stages 2 and 3
 
-### 2. `methods/gauge.py`
+`aia.md` gives an exact per-frame step variance (Eq. 36) and nothing else
+exact beyond it: the gain variance appears only in its isotropic form
+(Eq. 40), and the phase error under fitted steps exists only as the
+ideal-configuration readings Eq. (38) and Eq. (41). Three exact results have
+to be derived and added, in the style of Eq. (26)/(36):
 
-Move `_whiten_uv` → `whiten_uv` (`aia.md` §"A gauge freedom that only appears
-once g_n is free"). Add the one-line conventions currently inlined and
-duplicated in `aia()` and `aia_step_field()`: `pin_phase_origin`
-(`delta - delta[0]`), `normalize_gain` (`median(g) = 1`), `center_offsets`
-(`mean(c) = 0`), `center_coeffs` (frame-mean-zero, Eq. T3b/E4). Each call site
-becomes a named call; every expression is carried over unchanged.
+1. **Exact `sigma_g_n^2`**, the Eq. (36) counterpart for the gain: project
+   Eq. (35)'s `Cov(c_n, P_n, Q_n)` onto `r_n = (cos delta_n, sin delta_n)`
+   instead of `w_n`. Eq. (40) then becomes its isotropic reading, as Eq. (37)
+   is for Eq. (36). The cross term `Cov(delta_n, g_n)` comes from the same
+   projection and is needed by 2 and 3.
+2. **Exact `sigma_Phi^2` for Stage 2**, fitted steps and known gains:
+   propagate `e_delta_n` into the pixel step through the exact sensitivity of
+   Eq. (33), keeping its correlation with the pixel noise, since `delta_n` is
+   fitted from the same frames. Eq. (38) becomes the ideal-case reading of
+   this.
+3. **Exact `sigma_Phi^2` for Stage 3**, fitted steps and gains: as 2, with
+   `e_g_n` through Eq. (39) and the `Cov(delta_n, g_n)` cross term added.
+   Eq. (41) becomes its ideal-case reading.
 
-### 3. `basis.py` (package root)
+That correlation with the pixel noise is where the present Stage-2/3 argument
+does its work, and it is the part this plan could not validate, so the
+derivation states it explicitly rather than asserting a factor. The result
+should be a per-pixel quadratic form in small `(2N)`-sized matrices,
+computable alongside Eq. (26) without an `(N, H, W)` temporary.
 
-The spatial basis becomes a family of bases behind one entry point, so adding
-a family is a registered builder rather than an edit to any method. Root
-placement because `errors.py` needs it now and `carrier_removal.md` §1.3
-specifies the same basis for carrier removal.
+*Deliverable:* three new numbered equations in §"Phase-error covariance", with
+Eq. (38)/(40)/(41) retained as their approximate readings under stated
+conditions (step 4). New theory in a settled document, so written and agreed a
+step at a time per `docs/AGENTS.md`, and checked against step 1's measurement
+before it is implemented.
 
-- `spatial_basis(H, W, kind="poly", xp=np, **kwargs) -> (J, P) float64`, the
-  single entry point, cached per argument set as `_poly_basis` is today.
-  It validates `kind`, dispatches to the family builder, and then applies the
-  conventions every estimator relies on, in one place: subtract each row's
-  spatial mean (`interference_model.md` Eq. 9a, `sf_aia.md` Eq. T3) and
-  orthonormalize the rows in order.
-- `BASIS_REGISTRY = {"poly": _poly_terms}` and `BASES = list(BASIS_REGISTRY)`,
-  mirroring `METHOD_REGISTRY`/`METHODS`.
-- A family builder returns only its raw, un-centered rows, built from the
-  shared centered, unit-scaled coordinates of `sf_aia.md` §1.2(i).
-  `_poly_terms(degree)` is today's monomials of total degree 1 through `M`;
-  `degree=0` keeps meaning the empty basis, i.e. the piston model.
-- The frame-mean condition (Eq. 9b, T3b) stays in `methods/gauge.py`, since it
-  constrains the fitted coefficients rather than the basis.
+## Step 3. Rewrite `errors.py` on the exact forms
 
-Selection travels as `basis: str` plus `basis_kwargs: dict`, the same pair as
-`PhaseConfig.method`/`method_kwargs`, so a configuration stays YAML-safe
-through `PhaseConfig.to_yaml` — a typed spec object would not survive
-`yaml.safe_dump`.
+`phi_error` becomes Eq. (26) plus step 2's exact result — its Stage-2 form
+when `fit_gain` is False, its Stage-3 form when True — replacing the present
+Eq. (37)/(40)-based correction. `PhaseConfig.phi_error_simplified` keeps its
+meaning, baseline only or baseline plus the fitted-step contribution, but both
+branches are then exact rather than asymptotic.
 
-*API effect:* `aia_step_field(degree=1)` becomes
-`aia_step_field(basis="poly", basis_kwargs={"degree": 1})`;
-`StepFieldParam.degree` becomes `basis`/`basis_kwargs`, which is what
-`phase_step_field` and the error model rebuild the basis from.
-`tests/test_phase.py` imports `spatial_basis` instead of `_poly_basis`.
+*Verification:* against step 1's Monte Carlo at several `N`, `N_p` and step
+distributions, including the poorly conditioned ones where the approximations
+fail.
 
-### 4. `methods/steps.py`
+## Step 4. Document the approximations' validity
 
-Move `aia_pixel_step` → `pixel_step` and `aia_frame_step` → `frame_step`, with
-`_pixel_design`. Rewrite the four validation messages ("Stack shape must be
-have 2 dims") to name the argument and the received value.
+Keep the approximate forms as analysis, each with the measured conditions
+under which it may be used. In `aia.md`:
 
-### 5. `methods/aia.py`
+- **Eq. (29)** needs the second harmonic of `Phi` to average out, not "many
+  fringes": it is exact for `Phi` spanning any interval of length `pi`
+  (measured 1.0000), 25% off at `pi/2`, and a factor 2 off for a nearly flat
+  field. It separately needs `Phi` uncorrelated with `sigma/b` — with
+  `b = 1 + 0.6 cos(Phi)` it is 16% low even for a well-spread `Phi`.
+- **Eq. (37)** is exact to 4 digits at one fringe or more, but 3.3x off at half
+  a fringe and 22x at a quarter. The condition that fails first is not the
+  stated `Suu ~ Svv`, `Suv ~ 0` — both hold exactly at half a fringe — but the
+  unstated `Su ~ Sv ~ 0`, the quadratures being orthogonal to the design's
+  constant column.
+- **Eq. (38), (40) and (41)** become the approximate readings of step 2's
+  exact results, each with its regime of validity, measured in step 1. Stage 3
+  was still 18% from its asymptote at `N_p = 144`, so that regime is not
+  academic: it is where the small fields of a cropped ROI actually sit.
 
-Left holding `aia()` alone. Path header; `np.ndarray | None` and `DTypeLike`
-instead of `Optional`/untyped `dtype`; return type hint; docstrings trimmed to
-NumPy style with the derivations cited from `aia.md` instead of restated;
-`phase.*` → `phase_shift.*`; validation of `stack.ndim`, `iters`, `tol`. The
-per-iteration `I - c_fit[:, None]` full `(N, P)` temporary is reviewed against
-AGENTS §"Backend and numerics" and either justified or removed.
+## Step 5. SF-AIA: re-measure, rewrite to Eq. (E7), then compose
 
-### 6. `methods/sf_aia.py`
+Same treatment as AIA, in three parts.
 
-Same style pass. `step_field_quality` stops returning the `(N, P)` `resid`
-array its only caller discards. `StepFieldParam` gets `list[float]` and
-`DTypeLike` field types, and carries `basis`/`basis_kwargs` from step 3.
-`fit_step_field` and `step_field_quality` keep taking a prebuilt `(J, P)`
-basis array, so they stay family-agnostic. Validation messages rewritten as in
-step 4.
+1. **Re-measure as a variance.** The earlier SF-AIA result used the same MSE
+   quantity as the withdrawn Stage-2 finding. It is on firmer ground — it
+   compared two solves of the same estimator with `delta`/`g` fixed, and
+   reproduced Eq. (E8)'s `J` scaling at two basis sizes — but it is not
+   trusted until re-run.
+2. **Implement the exact Eq. (E7)**, with `Pi`, `t_n` and `D_n' D_m`, in place
+   of the present leverage-discount construction, which has the opposite sign
+   and six times the magnitude (`3*J/(2*N_p)` against `J/(4*N_p)`); a sign
+   flip alone would not fix it. Eq. (E8) moves to §"Validity" as the
+   uniform-steps reading, with the conditions it needs: `N >= 5`, constant
+   `g_n` and `b`, many fringes, and an orthonormal basis.
+3. **Compose with the fitted-step term** of step 2, which Eq. (E7) explicitly
+   leaves out. The SF-AIA error is the Eq. (26) baseline, plus the fitted
+   `delta_n`/`g_n` contribution, plus Eq. (E7)'s field-fit contribution —
+   each exact, with the correlations between them stated rather than assumed
+   away.
 
-### 7. Error model onto `MethodParam`
+## Step 6. VP-AIA: the same treatment in the document
 
-`MethodParam.phi_error(...)` returns `None` by default; `AIAParam` and
-`StepFieldParam` override it. `errors.py` keeps `_aia_phi_error_parts` and
-`_aia_step_field_phi_error` as shared derivations — `StepFieldParam` reuses the
-AIA parts through them, not through `methods/aia.py` — and loses
-`compute_phi_error`'s name dispatch. `PhaseSolver._phi_error` calls
-`method_param.phi_error(...)`. The step-field leverage term (`sf_aia.md`
-Eq. E7/E9) takes the basis from `StepFieldParam`'s `basis`/`basis_kwargs`
-instead of rebuilding it from `degree`.
+No implementation yet, so this step is `vp_aia.md` only, and it mirrors
+step 5's structure: Eq. (29) is already the exact form and Eq. (30) the
+uniform-steps approximation, so the work is to state Eq. (30)'s validity
+conditions (`N >= 5`, constant `g_n` and `b`, many fringes, orthonormal
+`H_j`), and to note that Eq. (29) excludes the fitted-step noise that step 2
+supplies.
 
-*API effect:* `compute_phi_error` is removed; a new method with an error model
-now needs no edit outside its own module.
+One cross-document check belongs here. For the same quantity — a `J`-mode
+phase-step field fitted from the same data — `sf_aia.md` Eq. (E8) gives
+`1 + J/(4*N_p)` and `vp_aia.md` Eq. (30) gives `1 + J/K`, a factor of 4 apart
+with `K = N_p`. The estimators differ (VP-AIA projects out the pixel
+corrections `a1, u1, v1`, SF-AIA does not), so the coefficients may legitimately
+differ, and the measured SF-AIA value sits at `J/4`. Worth confirming that the
+factor is the estimator and not an error in one of the two derivations, since
+the two documents otherwise describe the same physical effect.
 
-### 8. Registry rename
+## Step 7. Unify the contrast-scale gauge on the median
 
-`METHOD_REGISTRY` becomes `{"aia": aia, "sf_aia": aia_step_field}`. Update
-`config.py`'s docstring, `tests/test_phase.py`, and the README.
+`vp_aia.md` fixes the contrast scale with `mean(g_n) = 1`; `aia.md` Eq. (16),
+`sf_aia.md` and the code use `median(g_n) = 1`. Adopt the median: it is what
+the implementation does, and it is robust to a single frame whose gain
+collapses — the vibration-corrupted frame `g_min_ratio` exists to flag, which
+would drag a mean.
 
-*API effect:* `PhaseConfig(method="aia_step_field")` and `"aia_tilt"` stop
-working; `"sf_aia"` replaces both, with `degree=1` still the default.
+Four local places in `vp_aia.md`: the definition in §"Gauge conventions",
+normalization step 4, the sentence in §"Quadrature frame" naming the
+condition, and the two degree-of-freedom counts, which need only that the
+contrast scale is one scalar condition and are checked rather than changed.
+Nothing differentiates through the scale, so the substitution is free.
+`gauge_conventions.md`'s VP-AIA row then loses its "differs from AIA" note.
 
-### 9. `methods/__init__.py` and root exports
+## Step 8. README
 
-Re-export `pixel_step`, `frame_step`, `fit_step_field`, `step_field_quality`,
-`whiten_uv`, `aia_diagnostics`, `AIAParam`, `StepFieldParam`, `MethodParam`,
-`METHODS`, `METHOD_REGISTRY` from `phase_shift.methods`; add `spatial_basis`
-and `BASES` to `phase_shift/__init__.py`. Everything not listed gets a `_`
-prefix.
+Delete the `ripple.py` bullet; add `basis.py`, `methods/steps.py`,
+`methods/gauge.py`, `methods/diagnostics.py`; correct `README.md:46` from
+Eq. (8) to Eq. (17); document `StepFieldParam` alongside `AIAParam`.
 
-## Open question: two sign discrepancies in `errors.py`
+## Step 9. Invariant tests for the shared modules
 
-Found while moving the error model in step 7, and **left as the code has
-them** — `docs/AGENTS.md` says to raise a code/doc disagreement rather than
-reconcile it. Both affect only ``phi_error_simplified=False``, so the default
-output is unchanged.
+Direct tests for what the methods now rely on: `whiten_uv`'s Eq. (15)
+conditions; `normalize_gain`'s `median(g) = 1`; `center_offsets` and
+`center_coeffs`' zero means (Eq. 16, T3b); `pin_phase_origin`'s
+`delta[0] = 0`; `spatial_basis`' zero spatial mean and orthonormality for
+every registered family, and its `ValueError` on an unknown one;
+`MethodParam`'s default `phi_error` of `None`. Plus a cheap analytic
+regression test of Eq. (26) against Eq. (30) in the ideal configuration.
 
-1. **Stage-2/3 correction.** `aia.md` Eq. (38)/(41) make the correction a
-   *reduction* of ``sigma_Phi^2``, and the text warns that treating the step
-   error as independent of the pixel noise "gives the right size but the wrong
-   sign". `aia_phi_error_parts` returns ``phi_var + correction``. Measured in
-   the ideal configuration of those equations, the code's relative change is
-   ``+3.66e-04`` where Eq. (38) predicts ``-3.66e-04`` (Stage 2), and
-   ``+4.88e-04`` where Eq. (41) predicts ``-4.88e-04`` (Stage 3): the
-   magnitudes agree to 1.00, only the sign differs.
-2. **Step-field term.** `sf_aia.md` §"Noise of the corrected solve" states the
-   correction "cannot reduce the noise; it adds a variance term" (Eq. E7), and
-   Eq. (E8) gives ``1 + J/(4*N_p)``. `step_field_phi_error` computes a
-   leverage *discount* and returns ``phi_var - discount``.
+## Step 10. Degenerate bases
 
-Both look like the docs were revised without the code following: the equation
-numbers throughout `errors.py` referred to an older numbering of `aia.md`
-(Eq. 22 -> 26, 28 -> 33, 29 -> 34, 33 -> 37, 35 -> 39), and `sf_aia.md`'s
-Eq. (E5)/(E9) and §9, and `aia.md` §"Direct phase-error computation", no
-longer exist. The citations are corrected; the arithmetic is not.
+`spatial_basis` returns silent all-NaN rows when a coordinate is constant over
+the field (1 pixel wide or tall, and `2x3`/`3x2` at higher degree). Raise
+`ValueError` naming the shape and the family arguments instead.
+
+## Open question
+
+The frame step's `delta_n` is biased by `1-5e-4` rad in the configuration
+tested, varying with `delta_n`, with `bias^2` reaching 0.43 of the variance.
+Eq. (36) is a variance and is correct as such, so an error budget quoted as an
+RMS deviation from the true step is larger than Eq. (36) suggests. Worth
+deciding whether the bias belongs in the documented error model.
 
 ## Deferred
 
-- **VP-AIA** (`docs/vp_aia.md`): its own plan, after this one. Its Eq. (13)
-  modes `H_j` are any fixed, linearly independent spatial functions, so it
-  takes `basis`/`basis_kwargs` as SF-AIA does.
-- **Further basis families** (Zernike, Fourier, spline, …): one registered
-  builder each, no change to `spatial_basis` or the methods. The docs
-  currently prescribe a *polynomial* basis (`interference_model.md` Eq. 9b,
-  `sf_aia.md` Eq. T1), so per `docs/AGENTS.md` a new family needs the theory
-  updated first — the module makes that a doc question, not a code one.
-- **Carrier removal joint fit** (`docs/carrier_removal.md` §2–3, Eq. C1–C9):
-  unapproved theory; `carrier.py` keeps today's algorithm.
-- **Fixed working dtype** across the package: planned separately by the user;
-  `utils._estimation_weight` is the single place the weight dtype is decided.
-- **Stale doc references to `ripple.py`**: `README.md` and
-  `gauge_conventions.md` §"Phase ripple" still describe the removed module.
+- **Working dtype**, your own pass: `aia` returns `b` as float64 while
+  `a`/`phi` are float32, which is why `phi_error` comes back float64;
+  `utils._estimation_weight` is the one place the carrier, reference and
+  combine weight dtype is decided.
+- **`aia`'s joint-gain buffer**: `pinv(A) @ (I - c*1')` rearranged to remove
+  the `(N, P)` temporary, ~340 MB at 12 frames and 7 Mpx. Not bit-identical.
+- **`step_field_quality`'s residual**: chunked scoring would drop another
+  full-size array per refine round.
+- **`aia_step_field` -> `sf_aia`**, `StepFieldParam` -> `SFAIAParam`.
+- **VP-AIA implementation**: its own plan, on the shared modules.
+- **Carrier removal joint fit** (`carrier_removal.md` §2-3): unapproved
+  theory; `carrier.py` keeps today's algorithm.
