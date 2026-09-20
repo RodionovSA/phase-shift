@@ -12,9 +12,7 @@ import pytest
 from phase_shift import (
     PhaseConfig,
     PhaseSolver,
-    apply_phase_ripple,
     combine_acquisitions,
-    estimate_phase_ripple,
     measure_frame_contrast,
     remove_carrier,
     subtract_reference,
@@ -462,30 +460,6 @@ class TestCombine:
     def test_raises_on_single_acquisition(self):
         with pytest.raises(ValueError):
             combine_acquisitions([np.zeros((4, 4))])
-
-
-class TestRipple:
-    def test_roundtrip_recovers_known_ripple(self):
-        H, W = 96, 96
-        Y, X = np.mgrid[0:H, 0:W].astype(np.float64)
-        phi = np.angle(np.exp(1j * (0.1 * X + 0.05 * Y)))
-        coeffs_true = {0: 0.01, 1: (0.02, -0.01), 2: (0.005, 0.015)}
-
-        def eps(p):
-            e = np.full(p.shape, coeffs_true[0])
-            for k, (a, b) in ((1, coeffs_true[1]), (2, coeffs_true[2])):
-                e = e + a * np.cos(k * p) + b * np.sin(k * p)
-            return e
-
-        phi_w = wrap(phi)
-        corrupted = wrap(phi_w + eps(phi_w))
-        mask = np.ones((H, W), bool)
-
-        r = estimate_phase_ripple(corrupted, mask, orders=(1, 2), nbins=180)
-        assert r.rms_after < r.rms_before
-
-        recovered = apply_phase_ripple(corrupted, r)
-        assert circ_rms_deg(recovered, phi_w) < 1.0
 
 
 class TestWrap:

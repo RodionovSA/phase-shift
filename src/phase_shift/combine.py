@@ -1,13 +1,15 @@
+# src/phase_shift/combine.py
 """Averaging repeated, independent phase acquisitions of the same object."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 
 from .backend import get_array_module, to_device
 from .carrier import remove_carrier
 from .reference import subtract_reference
+from .utils import _estimation_weight
 
 
 @dataclass
@@ -17,125 +19,98 @@ class CombinedResult:
     Attributes
     ----------
     phi : np.ndarray, shape (H, W)
-        Combined phase map, in ``(-pi, pi]``.
+        Combined phase map, in radians, wrapped to ``[-pi, pi]``.
     scatter : np.ndarray, shape (H, W)
-        Per-pixel circular standard deviation across the input acquisitions,
-        in radians (``sqrt(-2*log(R))`` where ``R`` is the mean resultant
-        length) -- the empirical, per-pixel uncertainty of ``phi``. Rises
-        wherever the inputs disagree, e.g. low-modulation regions or spots
-        where one acquisition had a local defect.
+        Per-pixel circular standard deviation across the acquisitions, in
+        radians, ``sqrt(-2*log(R))``.
     mean_resultant : np.ndarray, shape (H, W)
-        Per-pixel mean resultant length ``R`` in ``[0, 1]`` (1 = perfect
-        agreement across acquisitions). ``scatter`` is a monotonic function
-        of this; kept separately since ``R`` is also directly useful as a
-        reliability weight (e.g. as ``weight=`` to
-        :func:`~phase.carrier.remove_carrier`).
+        Per-pixel mean resultant length ``R`` in ``[0, 1]``; 1 is perfect
+        agreement. Also usable as a reliability weight.
     n : int
         Number of acquisitions combined.
     sign_flips : list of int
-        Indices (into the input ``phis``) whose sign branch was flipped
-        (``-phi``) to match ``phis[reference]`` before averaging.
+        Indices into ``phis`` whose sign branch was flipped before averaging.
     """
 
     phi: np.ndarray
     scatter: np.ndarray
     mean_resultant: np.ndarray
     n: int
-    sign_flips: list
+    sign_flips: list[int]
 
 
-def combine_acquisitions(phis, weights=None, align_carrier: bool = True,
-                          reference: int = 0, carrier_kwargs: Optional[dict] = None,
-                          device: str = "auto") -> CombinedResult:
-    """Average independent, repeated phase measurements of the same object.
+def combine_acquisitions(phis: Sequence[np.ndarray],
+                         weights: Sequence[np.ndarray] | None = None,
+                         align_carrier: bool = True, reference: int = 0,
+                         carrier_kwargs: dict | None = None,
+                         device: str = "auto") -> CombinedResult:
+    """Average independent phase measurements of the same object.
 
-    A single phase-recovery run's accuracy is limited by real acquisition-to-
-    acquisition randomness (vibration, air currents, source noise) that does
-    not average out within one run, only across independent runs -- unlike
-    per-frame model errors (contrast, phase-step), which are systematic
-    within a run and need a better model rather than averaging (see
-    :class:`phase_shift.config.PhaseConfig`'s ``gain_mode`` and
-    :func:`phase_shift.frame_contrast.measure_frame_contrast`). Averaging ``k`` independent
-    acquisitions brings this random component down as the expected
-    ``1/sqrt(k)``.
+    Averaging ``k`` acquisitions reduces the random, acquisition-to-
+    acquisition component of the error as ``1/sqrt(k)``; it does not help
+    against per-frame model error, which is systematic within a run.
 
-    Three things must be resolved before a plain average of wrapped phase
-    maps means anything, all handled here using existing functions in this
-    package:
-
-    1. **Sign branch** -- each phase-recovery run independently lands on
-       ``+phi`` or ``-phi`` (see :func:`~phase.reference.subtract_reference`).
-       Every map is resolved against ``phis[reference]`` the same way
-       ``subtract_reference`` does, and flipped if that gives lower spread;
-       see ``sign_flips``. This is done on the *raw* input maps, before
-       carrier removal (step 2) -- the shared carrier (from the raw
-       object/reference beam tilt, often many fringes) is a strong,
-       unambiguous discriminant for the sign, whereas what two acquisitions
-       of the same object still share *after* their own carriers are
-       independently removed is only the real surface figure, which can be
-       comparable in size to acquisition-to-acquisition noise and too
-       marginal a signal to reliably resolve the branch from.
-    2. **Inter-acquisition drift** -- tilt/piston (and, if ``align_carrier``
-       includes ``defocus``, curvature) generally differ slightly between
-       acquisitions of the same nominal setup. Each sign-resolved map is
-       then passed through :func:`~phase.carrier.remove_carrier` so the
-       average isn't blurred by chasing a moving carrier.
-    3. **Circular averaging** -- phase is combined as the complex mean
-       ``mean(weight * exp(i*phi))``, never an arithmetic mean of the
-       wrapped angle.
+    Each map is first oriented to agree with ``phis[reference]`` using
+    :func:`phase_shift.reference.subtract_reference`'s discriminant, run on
+    the raw maps before carrier removal; then, when ``align_carrier`` is set,
+    passed through :func:`phase_shift.carrier.remove_carrier`; then combined
+    as the weighted complex mean. See ``docs/gauge_conventions.md``
+    §"Multi-acquisition combination".
 
     Parameters
     ----------
     phis : sequence of np.ndarray, each shape (H, W)
-        Independently recovered phase maps of the *same* object (e.g. one
-        per repeated scan). Pass :attr:`phase_shift.result.PhaseResult.phi` from
-        separate :meth:`~phase_shift.solver.PhaseSolver.fit` calls -- fit one
-        stack at a time and keep only ``phi``/``b``, rather than holding
-        every raw stack in memory at once.
+        Phase maps of the same object, in radians, e.g.
+        :attr:`phase_shift.result.PhaseResult.phi` from separate fits.
     weights : sequence of np.ndarray, each shape (H, W), optional
-        Per-acquisition, per-pixel reliability (e.g. each acquisition's
-        :attr:`phase_shift.result.PhaseResult.b`). Used both for the
-        carrier-removal step and the final weighted circular mean. Defaults
-        to uniform weight.
+        Per-acquisition reliability, e.g. each fit's
+        :attr:`phase_shift.result.PhaseResult.b`. Used both for carrier
+        removal and for the final mean. Negative values are clipped to 0.
+        Defaults to uniform weight.
     align_carrier : bool, default True
-        Run :func:`~phase.carrier.remove_carrier` (with ``defocus=True``)
-        on each map before combining. Turn off only if the maps are
-        already known to share one carrier (e.g. already differenced
-        against a reference).
+        Remove each map's own carrier before combining. Turn off when the
+        maps already share one carrier.
     reference : int, default 0
-        Index into ``phis`` that fixes the sign convention; every other map
-        is oriented to agree with this one.
+        Index into ``phis`` fixing the sign convention.
     carrier_kwargs : dict, optional
-        Extra keyword arguments forwarded to the internal
-        :func:`~phase.carrier.remove_carrier` calls (defaults to
-        ``defocus=True, refine_iters=10, n_blocks=10``, matching
-        ``remove_carrier``'s own defaults).
+        Keyword arguments forwarded to
+        :func:`phase_shift.carrier.remove_carrier`, overriding its defaults.
     device : {"auto", "cpu", "cuda"}, default "auto"
-        Where to run -- see :func:`phase.backend.to_device` for the full
-        explanation. Every array in ``phis``/``weights`` is uploaded if
-        needed (they should already share one device -- e.g. all recovered
-        by ``PhaseSolver(config, device="cuda")`` calls -- to avoid a
-        per-acquisition transfer here); the result's array fields stay on
-        that device rather than being downloaded automatically.
+        Device to run on; see :func:`phase_shift.backend.to_device`.
 
     Returns
     -------
     CombinedResult
-        See :class:`CombinedResult`.
+        Combined phase, its per-pixel scatter, and which maps were flipped.
+
+    Raises
+    ------
+    ValueError
+        If fewer than 2 acquisitions are given, if a map is not 2-D or the
+        maps differ in shape, if ``reference`` is out of range, or if
+        ``weights`` does not have one entry per acquisition.
     """
     n = len(phis)
     if n < 2:
-        raise ValueError(f"combine_acquisitions: need at least 2 acquisitions, got {n}")
+        raise ValueError(f"phis must hold at least 2 acquisitions, got {n}")
+    if not 0 <= reference < n:
+        raise ValueError(f"reference must be in [0, {n}), got {reference}")
+    if weights is not None and len(weights) != n:
+        raise ValueError(f"weights must have one entry per acquisition ({n}), "
+                         f"got {len(weights)}")
 
     phis = [to_device(p, device=device) for p in phis]
     xp = get_array_module(*phis)
-    H, W = phis[0].shape
-    ws = [xp.ones((H, W)) if weights is None
-          else xp.clip(to_device(weights[i], device=device), 0, None)
+    if phis[0].ndim != 2:
+        raise ValueError(f"each map in phis must be 2-D (H, W), got shape {phis[0].shape}")
+    for i, p in enumerate(phis):
+        if p.shape != phis[0].shape:
+            raise ValueError(f"phis[{i}] has shape {p.shape}, expected {phis[0].shape}")
+
+    ws = [_estimation_weight(phis[i], None if weights is None else weights[i],
+                             device=device, uniform_if_empty=False)
           for i in range(n)]
 
-    # Sign resolution on the raw maps, before carrier removal -- see step 1
-    # of this function's docstring for why.
     sign_flips = []
     resolved = list(phis)
     for i in range(n):
@@ -143,40 +118,31 @@ def combine_acquisitions(phis, weights=None, align_carrier: bool = True,
             continue
         dr = subtract_reference(phis[reference], phis[i], weight=ws[reference], device=device)
         if dr.sign == -1:
-            # -phis[i], not re-wrapped to (-pi, pi]: every later use of this
-            # map goes through exp(1j*phi) (here, and inside remove_carrier),
-            # which is exactly 2*pi-periodic, so the wrap is unobservable --
-            # skipping it avoids a needless exp/angle round-trip.
+            # Left unwrapped: every later use goes through exp(1j*phi).
             resolved[i] = -phis[i]
             sign_flips.append(i)
 
     aligned = resolved
     if align_carrier:
-        ckw = dict(defocus=True, refine_iters=10, n_blocks=10)
-        if carrier_kwargs:
-            ckw.update(carrier_kwargs)
+        ckw = dict(carrier_kwargs) if carrier_kwargs else {}
         aligned = [remove_carrier(p, weight=ws[i], device=device, **ckw).phi
                    for i, p in enumerate(aligned)]
 
-    # accumulate the weighted circular mean directly, rather than
-    # materializing an (n, H, W) complex stack just to sum it -- at n=5
-    # acquisitions and a several-megapixel ROI that stack can already reach
-    # several hundred MB, memory worth avoiding on a memory-constrained GPU.
+    # Accumulate the weighted circular mean instead of stacking (n, H, W).
     mean_field = total_w = None
     for w, p in zip(ws, aligned):
         term = w * xp.exp(1j * p)
         mean_field = term if mean_field is None else mean_field + term
         total_w = w if total_w is None else total_w + w
-    # keep the eps constant in each array's own dtype -- mixing in a float64
-    # scalar would silently upcast an otherwise-float32 pipeline via numpy's
-    # type promotion rules.
-    total_w = xp.where(total_w > 0, total_w, xp.asarray(xp.finfo(total_w.dtype).eps, total_w.dtype))
+    # Keep each floor in its array's own dtype, so a float32 input is not
+    # promoted by a float64 scalar.
+    total_w = xp.where(total_w > 0, total_w,
+                       xp.asarray(xp.finfo(total_w.dtype).eps, total_w.dtype))
     mean_field = mean_field / total_w
 
-    phi = xp.angle(mean_field)
     R = xp.clip(xp.abs(mean_field), 0, 1)
     R_floor = xp.asarray(xp.finfo(R.dtype).eps, R.dtype)
     scatter = xp.sqrt(xp.clip(-2 * xp.log(xp.maximum(R, R_floor)), 0, None))
 
-    return CombinedResult(phi=phi, scatter=scatter, mean_resultant=R,
-                           n=n, sign_flips=sign_flips)
+    return CombinedResult(phi=xp.angle(mean_field), scatter=scatter, mean_resultant=R,
+                          n=n, sign_flips=sign_flips)

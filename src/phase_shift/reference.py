@@ -1,13 +1,13 @@
-"""Resolving the +/-phi sign branch between a sample and reference phase map."""
+# src/phase_shift/reference.py
+"""Resolving the +/-phi sign branch between a sample and a reference phase map."""
 
 import warnings
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 
 from .backend import get_array_module, to_device
-from .utils import wrap, wrap_add, wrap_sub
+from .utils import _estimation_weight, wrap, wrap_add, wrap_sub
 
 
 @dataclass
@@ -17,19 +17,16 @@ class DifferenceResult:
     Attributes
     ----------
     phi : np.ndarray, shape (H, W)
-        Resolved phase difference, in ``(-pi, pi]``.
+        Resolved phase difference, in radians, wrapped to ``[-pi, pi]``.
     sign : int
-        ``+1`` if ``phi_ref`` was used as-is (``phi - phi_ref``); ``-1``
-        if ``phi_ref``'s sign branch was flipped before combining
-        (``phi + phi_ref``) -- see :func:`subtract_reference` for why.
+        ``+1`` if ``phi - phi_ref`` was kept, ``-1`` if ``phi_ref``'s sign
+        branch was flipped first (``phi + phi_ref``).
     spread_same : float
-        Weighted circular RMS spread, in radians, of ``phi - phi_ref``.
+        Weighted circular RMS spread of ``phi - phi_ref``, in radians.
     spread_flipped : float
-        Weighted circular RMS spread, in radians, of ``phi + phi_ref``.
+        Weighted circular RMS spread of ``phi + phi_ref``, in radians.
     ambiguous : bool
-        True if ``spread_same`` and ``spread_flipped`` were too close to
-        confidently pick a branch (see ``ambiguous_ratio``) -- the choice
-        of ``sign`` shouldn't be trusted without visually checking ``phi``.
+        True if the two spreads were too close to pick a branch confidently.
     """
 
     phi: np.ndarray
@@ -40,96 +37,68 @@ class DifferenceResult:
 
 
 def subtract_reference(phi: np.ndarray, phi_ref: np.ndarray,
-                        weight: Optional[np.ndarray] = None,
-                        mask: Optional[np.ndarray] = None,
-                        ambiguous_ratio: float = 1.5,
-                        device: str = "auto") -> DifferenceResult:
-    """Combine a sample phase map with an independently-recovered reference.
+                       weight: np.ndarray | None = None,
+                       mask: np.ndarray | None = None,
+                       ambiguous_ratio: float = 1.5,
+                       device: str = "auto") -> DifferenceResult:
+    """Subtract a reference phase map, resolving its sign branch first.
 
-    A reference measurement (same setup, no sample) is meant to capture
-    whatever tilt/curvature/background aberration comes purely from the
-    setup, so that subtracting it from a sample measurement's phase
-    cancels that shared aberration and leaves only the sample-induced
-    phase. This only works if ``phi`` and ``phi_ref`` share a common sign
-    convention -- and a phase-shifting solve (see :mod:`phase.solver`)
-    cannot guarantee that on its own.
-
-    Why not: the phase-shifting model ``I_n = a + b*cos(phi + delta_n)``
-    (the uniform-piston limit of ``docs/interference_model.md``, its
-    Eq. 20) is exactly invariant under
-    ``(phi, delta) -> (-phi, -delta)`` for every frame at once (cosine is
-    even), so no method solving this model from intensity data alone can
-    tell ``+phi`` from ``-phi``. Each independent solve converges to *one*
-    of these two mirror-image branches, and nothing forces two separate
-    runs (e.g. sample vs. reference) to land on the same one. If they land
-    on opposite branches, naive ``phi - phi_ref`` *adds* the shared
-    aberration instead of canceling it
-    (``phi_true - (-phi_true) = 2*phi_true``), which can make the result
-    visibly worse than not subtracting at all.
-
-    This function resolves the branch automatically: it computes both
-    ``phi - phi_ref`` and ``phi + phi_ref`` (wrap-safe, in the complex
-    domain) and keeps whichever has lower spread -- the shared aberration
-    is normally the dominant term in both ``phi`` and ``phi_ref``, so the
-    correctly-signed combination should cancel most of it and come out
-    with dramatically lower spread than the wrong one.
+    A solve recovers ``phi`` only up to ``(phi, delta) -> (-phi, -delta)``, so
+    two independent solves need not share a branch; see
+    ``docs/gauge_conventions.md`` §"Reference subtraction". Both
+    ``wrap(phi -+ phi_ref)`` are formed and the one with the lower weighted
+    circular spread is kept, since the aberration shared by the two
+    measurements cancels only in the correctly signed combination.
 
     Parameters
     ----------
     phi : np.ndarray, shape (H, W)
-        Sample phase map, in ``(-pi, pi]`` (e.g. :attr:`phase_shift.result.PhaseResult.phi`).
+        Sample phase map, in radians.
     phi_ref : np.ndarray, shape (H, W)
-        Reference phase map, same shape as ``phi``.
+        Reference phase map, in radians.
     weight : np.ndarray, shape (H, W), optional
-        Per-pixel reliability used to weight the spread comparison (e.g.
-        the sample's modulation map) -- does not affect the returned
-        ``phi`` itself, only which branch is judged better. Negative
+        Per-pixel reliability, e.g. :attr:`phase_shift.result.PhaseResult.b`.
+        Weights the spread comparison only, not the returned ``phi``. Negative
         values are clipped to 0.
     mask : np.ndarray, shape (H, W), optional
-        Boolean (or 0/1) map; pixels where it is falsey are excluded from
-        the spread comparison. Combined with ``weight`` if both are given.
+        Pixels where it is falsey are excluded from the comparison; combined
+        with ``weight``.
     ambiguous_ratio : float, default 1.5
-        If the larger of the two spreads is less than this factor times
-        the smaller, the branches aren't clearly distinguishable and
-        ``ambiguous=True`` is returned (with a warning) -- e.g. because
-        the shared aberration is small relative to noise/sample signal,
-        or the two measurements didn't actually share much of a common
-        aberration to cancel.
+        Report ``ambiguous`` when the larger spread is below this factor times
+        the smaller one. Must be at least 1.
     device : {"auto", "cpu", "cuda"}, default "auto"
-        Where to run -- see :func:`phase.backend.to_device` for the full
-        explanation. ``phi``/``phi_ref``/``weight``/``mask`` are uploaded if
-        needed; the result's ``phi`` field stays on that device rather than
-        being downloaded automatically.
+        Device to run on; see :func:`phase_shift.backend.to_device`.
 
     Returns
     -------
     DifferenceResult
-        See :class:`DifferenceResult`.
+        Resolved difference and the two spreads it was chosen from.
 
-    Notes
+    Raises
+    ------
+    ValueError
+        If ``phi`` is not 2-D, if ``phi_ref``, ``weight`` or ``mask`` does not
+        have ``phi``'s shape, or if ``ambiguous_ratio`` is below 1.
+
+    Warns
     -----
-    This resolves the sign ambiguity, not general drift between the two
-    measurements. If the setup moved between the sample and reference
-    shots, some residual tilt/curvature can remain in ``phi`` even after
-    picking the right branch -- :func:`~phase.carrier.remove_carrier` can
-    clean that up as a separate step, run on the *difference* map, not on
-    ``phi``/``phi_ref`` individually beforehand.
+    UserWarning
+        If the two spreads are too close to resolve the branch.
     """
+    if phi.ndim != 2:
+        raise ValueError(f"phi must be 2-D (H, W), got shape {phi.shape}")
     if phi.shape != phi_ref.shape:
-        raise ValueError(f"phi.shape {phi.shape} != phi_ref.shape {phi_ref.shape}")
+        raise ValueError(f"phi_ref must have shape {phi.shape}, got {phi_ref.shape}")
+    if ambiguous_ratio < 1:
+        raise ValueError(f"ambiguous_ratio must be at least 1, got {ambiguous_ratio}")
 
     phi = to_device(phi, device=device)
     phi_ref = to_device(phi_ref, device=device)
     xp = get_array_module(phi, phi_ref)
-    H, W = phi.shape
-    w = (xp.ones((H, W)) if weight is None
-         else xp.clip(to_device(weight, device=device), 0, None))
-    if mask is not None:
-        w = w * to_device(mask, device=device, dtype=bool)
-    if float(w.sum()) <= 0:
-        w = xp.ones((H, W))
+    w = _estimation_weight(phi, weight, mask, device)
 
     def spread(d: np.ndarray) -> float:
+        """Weighted circular RMS spread of ``d`` about its mean angle."""
         mean_angle = float(xp.angle(xp.sum(w * xp.exp(1j * d))))
         resid = wrap(d - mean_angle)
         return float(xp.sqrt(xp.sum(w * resid**2) / xp.sum(w)))
@@ -149,12 +118,11 @@ def subtract_reference(phi: np.ndarray, phi_ref: np.ndarray,
     if ambiguous:
         warnings.warn(
             f"subtract_reference: spread_same={spread_same:.4f} and "
-            f"spread_flipped={spread_flipped:.4f} are too close to "
-            f"confidently resolve the sign branch (ratio "
-            f"{hi / lo:.2f} < {ambiguous_ratio}); check phi visually "
-            f"before trusting it.",
+            f"spread_flipped={spread_flipped:.4f} are too close to resolve the "
+            f"sign branch (ratio {hi / lo:.2f} < {ambiguous_ratio}); check phi "
+            f"visually before trusting it.",
             stacklevel=2,
         )
 
     return DifferenceResult(phi=phi_out, sign=sign, spread_same=spread_same,
-                             spread_flipped=spread_flipped, ambiguous=ambiguous)
+                            spread_flipped=spread_flipped, ambiguous=ambiguous)

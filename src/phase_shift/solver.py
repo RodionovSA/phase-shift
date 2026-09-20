@@ -58,26 +58,23 @@ class PhaseSolver:
         Raises
         ------
         ValueError
-            If ``stack`` is not 3-D, or a frame has non-positive mean intensity
-            while ``config.use_alpha`` is set.
+            If ``stack`` is not 3-D, if ``config.g`` does not have shape
+            ``(N,)``, or if a frame has non-positive mean intensity while
+            ``config.use_alpha`` is set.
         """
         if stack.ndim != 3:
             raise ValueError(f"stack must be 3-D (N, H, W), got shape {stack.shape}")
         stack = to_device(stack, device=self.device, dtype=self.dtype)
         xp = get_array_module(stack)
-        
+
         normalized_stack, alpha = self._alpha_norm(stack, self.config.use_alpha)
         g, fit_gain = self._g_fit(stack, self.config.gain_mode, self.config.g)
         a, b, phi, delta, g, method_param = self._solve(normalized_stack, g, fit_gain)
-        residual_sq = self._rec_error(stack, a, b, phi, method_param, delta, g, alpha)
-        rmse = float(xp.sqrt(xp.mean(residual_sq)))
-        if self.config.noise_std is not None:
-            noise_std = to_device(self.config.noise_std, device=self.device, dtype=self.dtype)
-        else:
-            noise_std = xp.sqrt(xp.mean(residual_sq, axis=0))
-        phi_error = compute_phi_error(self.config.method, b, phi, delta, g, fit_gain,
-                                      noise_std, self.config.phi_error_simplified,
-                                      method_param, xp)
+        residual_mean_sq = self._residual_mean_sq(stack, a, b, phi, delta, g, alpha,
+                                                  method_param)
+        rmse = float(xp.sqrt(xp.mean(residual_mean_sq, dtype=xp.float64)))
+        phi_error = self._phi_error(b, phi, delta, g, fit_gain, residual_mean_sq,
+                                    method_param)
 
         self.result = PhaseResult(phi, a, b, delta, g, alpha, method_param, rmse, phi_error)
         return self
@@ -107,6 +104,8 @@ class PhaseSolver:
         ----------
         stack : np.ndarray, shape (N, H, W)
             Interferogram stack.
+        use_alpha : bool
+            If False, return ``stack`` unchanged and ``alpha_n = 1``.
 
         Returns
         -------
@@ -121,33 +120,130 @@ class PhaseSolver:
             If a frame has non-positive mean intensity.
         """
         xp = get_array_module(stack)
-        m = xp.mean(stack, axis=(1, 2))
+        if not use_alpha:
+            return stack, xp.ones(stack.shape[0], dtype=xp.float64)
+
+        m = xp.mean(stack, axis=(1, 2), dtype=xp.float64)                   # (N,)
         if not float(xp.min(m)) > 0:
             raise ValueError("every frame must have a positive mean intensity")
-        
-        alpha = m / xp.median(m) if use_alpha else xp.ones(stack.shape[0], dtype=xp.float64)
-        return stack / alpha[:, None, None], alpha
-    
-    def _g_fit(self, stack: np.ndarray, gain_mode: str, g: list| None = None) -> tuple[np.ndarray, bool]:
+        alpha = m / xp.median(m)
+        scale = alpha.astype(stack.dtype) if stack.dtype.kind == "f" else alpha
+        return stack / scale[:, None, None], alpha
+
+    def _g_fit(self, stack: np.ndarray, gain_mode: str,
+               g: np.ndarray | None = None) -> tuple[np.ndarray, bool]:
+        """Resolve the per-frame fringe gain ``g_n`` the method starts from.
+
+        Parameters
+        ----------
+        stack : np.ndarray, shape (N, H, W)
+            Interferogram stack; only its frame count and array module are used.
+        gain_mode : {"none", "joint"}
+            ``"joint"`` lets the method fit ``g_n``; ignored when ``g`` is given.
+        g : np.ndarray, shape (N,), optional
+            Fixed gain. If None, start from ``g_n = 1``.
+
+        Returns
+        -------
+        g : np.ndarray, shape (N,), float64
+            Fixed or initial per-frame gain.
+        fit_gain : bool
+            Whether the method fits ``g_n`` jointly with the phase steps.
+
+        Raises
+        ------
+        ValueError
+            If ``g`` does not have shape ``(N,)``.
+        """
         xp = get_array_module(stack)
-        if g is not None:
-            g = xp.asarray(g, dtype=xp.float64)
-            fit_gain = False
+        N = stack.shape[0]
+        if g is None:
+            return xp.ones(N, dtype=xp.float64), gain_mode == "joint"
+
+        g = xp.asarray(g, dtype=xp.float64)
+        if g.shape != (N,):
+            raise ValueError(f"g must have shape ({N},), got {g.shape}")
+        return g, False
+
+    def _residual_mean_sq(self, stack: np.ndarray, a: np.ndarray, b: np.ndarray,
+                          phi: np.ndarray, delta: np.ndarray, g: np.ndarray,
+                          alpha: np.ndarray, method_param: MethodParam) -> np.ndarray:
+        """Mean squared difference between ``stack`` and the fitted model, per pixel.
+
+        Evaluates ``docs/interference_model.md`` Eq. (17) at the fitted fields
+        via :func:`phase_shift.interference_model.model_stack`, one frame at a
+        time so no ``(N, H, W)`` temporary is held. The per-frame step comes
+        from :meth:`phase_shift.methods.base.MethodParam.phase_step_field`, so
+        a spatially varying step is reconstructed as the method recovered it.
+
+        Parameters
+        ----------
+        stack : np.ndarray, shape (N, H, W)
+            Input stack, before ``alpha_n`` normalization.
+        a, b, phi : np.ndarray, shape (H, W)
+            Fitted background, fringe amplitude, and phase in radians.
+        delta, g, alpha : np.ndarray, shape (N,)
+            Fitted phase steps and gain, and the source-power factor.
+        method_param : MethodParam
+            Diagnostics of the method that produced the fit.
+
+        Returns
+        -------
+        np.ndarray, shape (H, W)
+            Residual mean square, in squared input units.
+        """
+        xp = get_array_module(stack)
+        work = b.dtype
+        N, H, W = stack.shape
+        delta_field = method_param.phase_step_field(delta.astype(work), H, W, xp)
+        g_w = g.astype(work)
+        alpha_w = alpha.astype(work)
+
+        residual_sq_sum = xp.zeros((H, W), dtype=work)
+        for n in range(N):
+            model = model_stack(a, b, phi, delta_field[n:n + 1], g_w[n:n + 1],
+                                alpha_w[n:n + 1])                           # (1, H, W)
+            residual_sq_sum += (stack[n] - model[0]) ** 2
+        return residual_sq_sum / N
+
+    def _phi_error(self, b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: np.ndarray,
+                   fit_gain: bool, residual_mean_sq: np.ndarray,
+                   method_param: MethodParam) -> np.ndarray | None:
+        """Per-pixel phase standard deviation of the fit.
+
+        Uses ``config.noise_std`` as ``sigma_0`` when given, otherwise the
+        per-pixel RMS fit residual; see
+        :func:`phase_shift.errors.compute_phi_error`.
+
+        Parameters
+        ----------
+        b, phi : np.ndarray, shape (H, W)
+            Fitted fringe amplitude and phase in radians.
+        delta, g : np.ndarray, shape (N,)
+            Fitted per-frame phase steps and gain.
+        fit_gain : bool
+            Whether ``g`` was fitted jointly with the phase steps.
+        residual_mean_sq : np.ndarray, shape (H, W)
+            Per-pixel residual mean square from :meth:`_residual_mean_sq`.
+        method_param : MethodParam
+            Diagnostics of the method that produced the fit.
+
+        Returns
+        -------
+        np.ndarray, shape (H, W), or None
+            ``sigma_Phi`` in radians, or None for a method without an error
+            model.
+
+        Raises
+        ------
+        ValueError
+            If ``config.noise_std``'s shape does not match ``phi``.
+        """
+        xp = get_array_module(b)
+        if self.config.noise_std is not None:
+            noise_std = to_device(self.config.noise_std, device=self.device, dtype=b.dtype)
         else:
-            g = xp.ones(stack.shape[0])
-            fit_gain = gain_mode == "joint"
-            
-        return g, fit_gain
-    
-    def _rec_error(self, stack: np.ndarray, a: np.ndarray, b: np.ndarray, phi: np.ndarray, 
-               method_param: MethodParam, delta: np.ndarray, g: np.ndarray, 
-               alpha: np.ndarray) -> np.ndarray:
-        
-        xp = get_array_module(stack)
-        H, W = phi.shape
-        model = model_stack(a, b, phi, method_param.phase_step_field(delta, H, W, xp), g, alpha)
-        residual_sq = (stack - model) ** 2
-        return residual_sq 
-    
-    def _phi_error():
-        ...
+            noise_std = xp.sqrt(residual_mean_sq)
+        return compute_phi_error(self.config.method, b, phi, delta, g, fit_gain,
+                                 noise_std, self.config.phi_error_simplified,
+                                 method_param, xp)

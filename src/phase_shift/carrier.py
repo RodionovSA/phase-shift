@@ -1,39 +1,40 @@
-"""Estimating and removing the spatial carrier/defocus from a phase map."""
+# src/phase_shift/carrier.py
+"""Estimating and removing the spatial carrier and defocus of a phase map."""
 
 import cmath
 import math
 import warnings
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 
 from .backend import get_array_module, to_device
+from .utils import _estimation_weight
 
 
 @dataclass
 class CarrierResult:
     """Output of :func:`remove_carrier`.
 
+    Conventions follow ``docs/gauge_conventions.md`` §"Carrier removal": the
+    origin is pixel ``(0, 0)`` with unnormalized ``x, y``, and the output's
+    weighted circular mean is zero.
+
     Attributes
     ----------
     phi : np.ndarray, shape (H, W)
-        Wrapped phase map with the linear carrier (and, if requested, the
-        defocus term) and piston removed, in ``(-pi, pi]``.
+        Phase with the carrier, the curvature term (when fitted), and the
+        piston removed, in radians, wrapped to ``[-pi, pi]``.
     kx, ky : float
-        Fitted carrier spatial frequency, in rad/pixel, along the column
-        (x) and row (y) axes respectively.
+        Carrier spatial frequency along the column (x) and row (y) axes, in
+        rad/pixel.
     fx, fy : float
-        Same carrier, in cycles/pixel (``kx = 2*pi*fx``, ``ky = 2*pi*fy``).
+        The same carrier in cycles/pixel, ``kx = 2*pi*fx``.
     kxx, kyy, kxy : float
-        Fitted quadratic curvature coefficients, in rad/pixel^2, for the
-        term ``kxx*x^2 + kyy*y^2 + kxy*x*y``. All ``0.0`` when
-        ``defocus=False``. ``kxx == kyy`` and ``kxy == 0`` corresponds to
-        isotropic defocus (a spherical wavefront); ``kxx != kyy`` and/or
-        ``kxy != 0`` describes astigmatic/cross-coupled curvature.
+        Curvature coefficients of ``kxx*x^2 + kyy*y^2 + kxy*x*y``, in
+        rad/pixel^2. All ``0.0`` when ``defocus=False``.
     piston : float
-        Fitted constant phase offset, in radians, removed after
-        demodulation.
+        Constant phase offset removed after demodulation, in radians.
     """
 
     phi: np.ndarray
@@ -47,18 +48,20 @@ class CarrierResult:
     piston: float
 
 
-def _next_smooth(n: int, factors=(2, 3, 5, 7)) -> int:
-    """Smallest ``m >= n`` whose only prime factors are in ``factors``.
+def _next_smooth(n: int, factors: tuple[int, ...] = (2, 3, 5, 7)) -> int:
+    """Return the smallest ``m >= n`` whose prime factors all lie in ``factors``.
 
-    Used to zero-pad the *coarse* peak-search FFT below to a size cuFFT (and
-    pocketfft) handle efficiently. At a full-sensor acquisition size such as
-    ``(2200, 3296)``, ``H, W`` factor as ``2^3*5^2*11`` and ``2^5*103`` -- the
-    11 and 103 push both onto a slow mixed-radix/Bluestein path. Padding to
-    the next 7-smooth size (2200->2205, 3296->3360) avoids that, and is
-    safe: the coarse FFT only has to land the peak within about one bin of
-    the true carrier, since :func:`_estimate_tilt`'s closed-form refine then
-    converges to the exact same fixed point regardless of which nearby bin
-    it started from.
+    Parameters
+    ----------
+    n : int
+        Lower bound, in samples.
+    factors : tuple of int, default (2, 3, 5, 7)
+        Allowed prime factors.
+
+    Returns
+    -------
+    int
+        FFT length to zero-pad to.
     """
     k = n
     while True:
@@ -71,11 +74,22 @@ def _next_smooth(n: int, factors=(2, 3, 5, 7)) -> int:
         k += 1
 
 
-def _coarse_peak(field, xp):
-    """Locate the dominant off-DC peak of ``field``'s spectrum, FFT zero-padded
-    to an efficient size (see :func:`_next_smooth`). Returns cycles/pixel
-    ``(fy, fx)`` -- an integer-bin estimate later refined by
-    :func:`_estimate_tilt`."""
+def _coarse_peak(field: np.ndarray) -> tuple[float, float]:
+    """Locate the dominant peak of ``field``'s spectrum, to one FFT bin.
+
+    The transform is zero-padded to an efficient length (:func:`_next_smooth`).
+
+    Parameters
+    ----------
+    field : np.ndarray, shape (H, W)
+        Complex field to transform.
+
+    Returns
+    -------
+    fy, fx : float
+        Peak frequency along the row and column axes, in cycles/pixel.
+    """
+    xp = get_array_module(field)
     H, W = field.shape
     Hp, Wp = _next_smooth(H), _next_smooth(W)
     if (Hp, Wp) != (H, W):
@@ -90,28 +104,32 @@ def _coarse_peak(field, xp):
     return fy, fx
 
 
-def _estimate_tilt(c: np.ndarray, w: np.ndarray, window: bool, refine_iters: int) -> tuple:
-    """Estimate the dominant linear carrier ``(fx, fy)`` of a complex field.
+def _estimate_tilt(c: np.ndarray, w: np.ndarray, window: bool,
+                   refine_iters: int) -> tuple[float, float]:
+    """Estimate the dominant linear carrier of a complex field.
 
-    Shared by :func:`remove_carrier`'s final full-field estimate and (via
-    :func:`_estimate_curvature`'s batched variant below) its per-block
-    defocus pre-estimation -- see :func:`remove_carrier`'s Algorithm section
-    (steps 1-2) for the coarse-FFT + wrap-safe-refine method.
+    A coarse FFT peak (:func:`_coarse_peak`) is refined on the vector-averaged
+    phase difference of neighboring pixels,
+    ``Sx = sum(w_pair * c[:, 1:] * conj(c[:, :-1]))`` along columns and ``Sy``
+    along rows. ``Sx``/``Sy`` do not depend on the current estimate, so they
+    are formed once and the refinement iterates on their angles, which keeps
+    the estimate wrap-safe. See ``docs/carrier_removal.md`` §5.
 
-    Algorithm note: the residual-tilt refine below is a *closed form*, not a
-    literal per-iteration re-demodulation of the full field. In
-    ``sum(w_pair * d[...,1:] * conj(d[...,:-1]))`` with
-    ``d = c * exp(-2*pi*i*(fx*x + fy*y))``, the position-dependent phase
-    factor is identical on both members of every neighboring-pixel pair and
-    cancels except for the fixed 1-pixel step between them, so the whole sum
-    factors as ``exp(-2*pi*i*fx) * Sx`` where
-    ``Sx = sum(w_pair * c[...,1:] * conj(c[...,:-1]))`` does not depend on
-    the current ``(fx, fy)`` estimate at all (same for ``Sy`` down rows).
-    ``Sx``/``Sy`` are therefore computed once, and the fixed-point iteration
-    that follows runs on their two (scalar) angles rather than re-summing
-    the full field every pass -- exact to float64 precision, at a fraction
-    of the memory traffic, and with zero further GPU kernel launches once
-    ``Sx``/``Sy`` are known.
+    Parameters
+    ----------
+    c : np.ndarray, shape (H, W)
+        Complex field, ``exp(1j * phi)``.
+    w : np.ndarray, shape (H, W)
+        Per-pixel estimation weight.
+    window : bool
+        Apply a 2-D Hann window before the coarse FFT.
+    refine_iters : int
+        Maximum number of refinement iterations.
+
+    Returns
+    -------
+    fx, fy : float
+        Carrier frequency along the column and row axes, in cycles/pixel.
     """
     xp = get_array_module(c, w)
     H, W = c.shape
@@ -119,7 +137,7 @@ def _estimate_tilt(c: np.ndarray, w: np.ndarray, window: bool, refine_iters: int
         win = xp.outer(xp.hanning(H), xp.hanning(W))
     else:
         win = xp.ones((H, W))
-    fy, fx = _coarse_peak(w * c * win, xp)
+    fy, fx = _coarse_peak(w * c * win)
 
     Sx = Sy = None
     if W > 1:
@@ -143,44 +161,43 @@ def _estimate_tilt(c: np.ndarray, w: np.ndarray, window: bool, refine_iters: int
     return fx, fy
 
 
-def _estimate_curvature(c: np.ndarray, w: np.ndarray, window: bool,
-                         refine_iters: int, n_blocks: int) -> tuple:
-    """Estimate quadratic curvature ``(kxx, kyy, kxy)`` via block-wise tilt.
+def _estimate_curvature(c: np.ndarray, w: np.ndarray, window: bool, refine_iters: int,
+                        n_blocks: int) -> tuple[float, float, float]:
+    """Estimate quadratic curvature from the local tilt of a block grid.
 
-    For ``phi = piston + kx*x + ky*y + kxx*x^2 + kyy*y^2 + kxy*x*y``, the
-    local instantaneous frequency is linear in position:
-    ``fx_local(x, y) = fx0 + (kxx/pi)*x + (kxy/(2*pi))*y``,
-    ``fy_local(x, y) = fy0 + (kxy/(2*pi))*x + (kyy/pi)*y``. Splits the field
-    into an ``n_blocks x n_blocks`` grid of equal-size blocks, measures a
-    local ``(fx, fy)`` per block, and fits that (coupled, since ``kxy``
-    appears in both) linear relationship by least squares across all blocks
-    to recover ``kxx, kyy, kxy``. Returns all zeros (with a warning) if
-    fewer than 4 blocks have usable weight, since that under-determines the
-    5-unknown fit.
+    For ``phi = piston + kx*x + ky*y + kxx*x^2 + kyy*y^2 + kxy*x*y`` the local
+    frequency is linear in position,
+    ``fx(x, y) = fx0 + (kxx/pi)*x + (kxy/(2*pi))*y`` and
+    ``fy(x, y) = fy0 + (kxy/(2*pi))*x + (kyy/pi)*y``. The field is split into
+    an ``n_blocks x n_blocks`` grid of equal-size blocks, cropped to the
+    largest size divisible by ``n_blocks``; every block's local frequency is
+    estimated as in :func:`_estimate_tilt`, batched over one FFT, and the two
+    relations above are fitted jointly by least squares over all blocks.
 
-    All ``n_blocks**2`` blocks are estimated in one batch -- a single
-    windowed+padded FFT over the whole ``(n_blocks**2, bh, bw)`` stack, then
-    the same closed-form ``Sx``/``Sy`` reduction and fixed-point refine as
-    :func:`_estimate_tilt`, done per-block via array ops rather than a
-    Python loop calling :func:`_estimate_tilt` once per block. At the
-    docstring default (``n_blocks=10``) that replaces 100 separate small
-    FFT + refine calls -- disproportionately expensive as GPU kernel-launch
-    overhead -- with O(1) launches. Blocks are equal-size, obtained by
-    cropping to the largest ``H', W'`` divisible by ``n_blocks`` (dropping at
-    most ``n_blocks - 1`` pixels along the far edge of each axis) rather than
-    the ragged groups ``np.array_split`` would give, so the block grid can be
-    reshaped into a batch dimension instead of gathered with ``np.ix_``
-    (which forces a copy per block).
+    Parameters
+    ----------
+    c : np.ndarray, shape (H, W)
+        Complex field, ``exp(1j * phi)``.
+    w : np.ndarray, shape (H, W)
+        Per-pixel estimation weight.
+    window : bool
+        Apply a 2-D Hann window before each block's coarse FFT.
+    refine_iters : int
+        Number of refinement iterations per block.
+    n_blocks : int
+        Grid size along each axis.
 
-    Unlike :func:`_estimate_tilt`, this is *not* bit-identical to a
-    per-block-loop implementation using ``np.array_split`` for the block
-    boundaries -- the different block boundaries (equal-size crop vs.
-    ``array_split``'s ragged groups, plus dropped edge pixels) shift each
-    block's local tilt estimate slightly, which the regression then
-    propagates into ``kxx, kyy, kxy``. The resulting difference in the
-    final ``phi`` is well within the acquisition-to-acquisition scatter
-    this package otherwise expects (see
-    :func:`~phase.combine.combine_acquisitions`).
+    Returns
+    -------
+    kxx, kyy, kxy : float
+        Curvature coefficients, in rad/pixel^2; all ``0.0`` if the fit is
+        under-determined.
+
+    Warns
+    -----
+    UserWarning
+        If the blocks are smaller than 2x2, or fewer than 4 of them carry
+        usable weight for the 5-unknown fit.
     """
     xp = get_array_module(c, w)
     H, W = c.shape
@@ -195,7 +212,8 @@ def _estimate_curvature(c: np.ndarray, w: np.ndarray, window: bool,
         return 0.0, 0.0, 0.0
     Hc, Wc = bh * n_blocks, bw * n_blocks
 
-    def to_blocks(a):
+    def to_blocks(a: np.ndarray) -> np.ndarray:
+        """Reshape ``a`` into ``(n_blocks**2, bh, bw)`` equal-size blocks."""
         return (a[:Hc, :Wc].reshape(n_blocks, bh, n_blocks, bw)
                  .transpose(0, 2, 1, 3).reshape(n_blocks * n_blocks, bh, bw))
 
@@ -206,7 +224,7 @@ def _estimate_curvature(c: np.ndarray, w: np.ndarray, window: bool,
     win = (xp.outer(xp.hanning(bh), xp.hanning(bw)) if (window and bh > 1 and bw > 1)
            else xp.ones((bh, bw)))
 
-    # coarse peak per block, via one padded batched FFT
+    # Coarse peak per block, from one padded batched FFT.
     bhp, bwp = _next_smooth(bh), _next_smooth(bw)
     field = w_b * c_b * win
     if (bhp, bwp) != (bh, bw):
@@ -218,11 +236,10 @@ def _estimate_curvature(c: np.ndarray, w: np.ndarray, window: bool,
     Fabs = xp.abs(F).reshape(nblk, -1)
     peak = xp.argmax(Fabs, axis=1)
     iy, ix = peak // bwp, peak % bwp
-    fy = xp.fft.fftfreq(bhp)[iy].astype(xp.float64)
-    fx = xp.fft.fftfreq(bwp)[ix].astype(xp.float64)
+    fy = xp.fft.fftfreq(bhp)[iy].astype(xp.float64)                      # (nblk,)
+    fx = xp.fft.fftfreq(bwp)[ix].astype(xp.float64)                      # (nblk,)
 
-    # closed-form Sx/Sy per block (see _estimate_tilt), then the same
-    # fixed-point refine, vectorized over the block axis.
+    # Per-block Sx/Sy and refinement, vectorized over the block axis.
     have_x, have_y = bw > 1, bh > 1
     if have_x:
         wpx = w_b[:, :, 1:] * w_b[:, :, :-1]
@@ -242,8 +259,8 @@ def _estimate_curvature(c: np.ndarray, w: np.ndarray, window: bool,
 
     block_row = xp.repeat(xp.arange(n_blocks), n_blocks)
     block_col = xp.tile(xp.arange(n_blocks), n_blocks)
-    yc = block_row.astype(xp.float64) * bh + (bh - 1) / 2.0
-    xc = block_col.astype(xp.float64) * bw + (bw - 1) / 2.0
+    yc = block_row.astype(xp.float64) * bh + (bh - 1) / 2.0              # (nblk,)
+    xc = block_col.astype(xp.float64) * bw + (bw - 1) / 2.0              # (nblk,)
 
     total_w = float(w.sum())
     floor = 0.01 * total_w / max(nblk, 1)
@@ -263,9 +280,8 @@ def _estimate_curvature(c: np.ndarray, w: np.ndarray, window: bool,
     xc_u, yc_u = xc[usable], yc[usable]
     fx_u, fy_u = fx[usable], fy[usable]
 
-    # unknowns: [fx0, fy0, A=kxx/pi, B=kxy/(2*pi), C=kyy/pi]
+    # Unknowns [fx0, fy0, kxx/pi, kxy/(2*pi), kyy/pi], two rows per block.
     M = xp.zeros((2 * n, 5), dtype=xp.float64)
-    
     rhs = xp.zeros(2 * n, dtype=xp.float64)
     M[0::2, 0] = 1.0
     M[0::2, 2] = xc_u
@@ -276,165 +292,104 @@ def _estimate_curvature(c: np.ndarray, w: np.ndarray, window: bool,
     M[1::2, 4] = yc_u
     rhs[1::2] = fy_u
     sol = xp.linalg.lstsq(M, rhs, rcond=None)[0]
-    A, B, C = float(sol[2]), float(sol[3]), float(sol[4])
-    kxx = float(np.pi * A)
-    kyy = float(np.pi * C)
-    kxy = float(2 * np.pi * B)
+    kxx = float(np.pi * float(sol[2]))
+    kyy = float(np.pi * float(sol[4]))
+    kxy = float(2 * np.pi * float(sol[3]))
     return kxx, kyy, kxy
 
 
-def remove_carrier(phi: np.ndarray, weight: Optional[np.ndarray] = None,
-                    mask: Optional[np.ndarray] = None, refine_iters: int = 10,
-                    window: bool = True, defocus: bool = True,
-                    n_blocks: int = 10, device: str = "auto") -> CarrierResult:
-    """Estimate and remove a linear phase carrier from a wrapped phase map.
+def remove_carrier(phi: np.ndarray, weight: np.ndarray | None = None,
+                   mask: np.ndarray | None = None, refine_iters: int = 10,
+                   window: bool = True, defocus: bool = True,
+                   n_blocks: int = 10, device: str = "auto") -> CarrierResult:
+    """Estimate and remove the spatial carrier of a wrapped phase map.
 
-    Off-axis / tilted-reference interferometry (and piezo-scanning setups
-    with a residual tilt) superimpose a spatial carrier on the recovered
-    phase::
+    Removes the linear ramp ``kx*x + ky*y``, the ``piston``, and, when
+    ``defocus`` is set, the curvature ``kxx*x^2 + kyy*y^2 + kxy*x*y`` from
 
-        phi(x, y) = wrap(phase_obj(x, y) + kx*x + ky*y
-                         + kxx*x^2 + kyy*y^2 + kxy*x*y + piston)
+        ``phi = wrap(phase_obj + kx*x + ky*y
+                     + kxx*x^2 + kyy*y^2 + kxy*x*y + piston)``
 
-    This removes the linear ramp ``kx*x + ky*y``, the constant ``piston``,
-    and -- if ``defocus=True`` -- the quadratic curvature term
-    ``kxx*x^2 + kyy*y^2 + kxy*x*y``, leaving ``wrap(phase_obj)``. It never
-    unwraps: all estimation happens on the complex field ``exp(i*phi)``,
-    so it is insensitive to how many fringes the carrier spans.
-
-    Algorithm
-    ---------
-    1. **Coarse (FFT).** FFT the (optionally Hann-windowed, to suppress
-       edge leakage) weighted complex field ``weight * exp(i*phi)``; the
-       carrier shows up as the dominant off-DC peak. Its bin gives an
-       integer-pixel estimate of the carrier frequency ``(fx, fy)`` in
-       cycles/pixel. This step is what makes the method robust to a high
-       carrier (many fringes across the field, near the Nyquist limit) --
-       a pixel-to-pixel gradient estimate alone would alias there. The
-       field is zero-padded to an FFT-efficient size for this step only
-       (see :func:`_next_smooth`); it only has to localize the peak to
-       within about one bin, which step 2 then resolves exactly.
-    2. **Sub-pixel refinement (wrap-safe, closed-form).** The residual tilt
-       after demodulating by the current ``(fx, fy)`` estimate is measured
-       by vector averaging of neighboring-pixel phase differences --
-       equivalent to a weighted circular mean of local gradients, so wraps
-       in the residual don't bias the estimate the way a naive
-       finite-difference-then-average would -- and, because that averaged
-       quantity turns out not to depend on the current ``(fx, fy)`` guess at
-       all (see :func:`_estimate_tilt`), is computed once and then iterated
-       as a fixed point on two scalars rather than re-demodulating the full
-       field ``refine_iters`` times. Steps 1-2 are :func:`_estimate_tilt`.
-    3. **Curvature pre-correction (if ``defocus=True``), before step 1-2's
-       final pass.** A quadratic phase is a 2D chirp: its local
-       instantaneous frequency varies linearly with position (and, if the
-       curvature is anisotropic, ``fx`` also varies with ``y`` and vice
-       versa via the coupled ``kxy`` term). Splitting the field into an
-       ``n_blocks x n_blocks`` grid and running steps 1-2 *within each
-       block* (all blocks at once, see :func:`_estimate_curvature`) gives a
-       local ``(fx, fy)`` sample at each block's center; jointly regressing
-       those samples against block position recovers ``kxx, kyy, kxy``. The
-       field is demodulated by ``kxx*x^2 + kyy*y^2 + kxy*x*y`` before the
-       final, full-field tilt/piston pass, which then only has to polish the
-       (typically much smaller) residual linear term.
-    4. **Demodulate + piston.** Divide out the final carrier (and defocus,
-       if applicable), then remove the constant phase offset via the
-       (weighted) mean resultant vector.
+    All estimation runs on ``exp(1j * phi)``, so the map is never unwrapped
+    and the number of carrier fringes is unrestricted. The steps are: fit the
+    curvature from a block grid (:func:`_estimate_curvature`) and demodulate
+    it; fit the remaining tilt (:func:`_estimate_tilt`) and demodulate it;
+    remove the piston as the weighted circular mean. See
+    ``docs/carrier_removal.md`` §5 for the method and ``docs/gauge_conventions.md``
+    §"Carrier removal" for the origin, piston, and frequency conventions.
 
     Parameters
     ----------
     phi : np.ndarray, shape (H, W)
-        Wrapped phase map, in ``(-pi, pi]`` (e.g. :attr:`phase_shift.result.PhaseResult.phi`).
+        Wrapped phase map, in radians, e.g.
+        :attr:`phase_shift.result.PhaseResult.phi`.
     weight : np.ndarray, shape (H, W), optional
-        Per-pixel reliability used only for *estimating* the carrier (e.g.
-        :attr:`phase_shift.result.PhaseResult.b`, the modulation map) --
-        down-weights noisy, low-modulation pixels so they don't bias the
-        fit. Negative values are clipped to 0. Does not affect the returned
-        ``phi``, which is always computed from the unweighted field.
+        Per-pixel reliability, e.g. :attr:`phase_shift.result.PhaseResult.b`.
+        Used for estimation only; the returned ``phi`` is computed from the
+        unweighted field. Negative values are clipped to 0.
     mask : np.ndarray, shape (H, W), optional
-        Boolean (or 0/1) map; pixels where it is falsey are excluded from
-        estimation, same effect as ``weight=0`` there. Combined with
-        ``weight`` if both are given.
+        Pixels where it is falsey are excluded from estimation; combined with
+        ``weight``.
     refine_iters : int, default 10
-        Number of sub-pixel refinement iterations after each coarse FFT
-        step (both the final full-field estimate and, if ``defocus=True``,
-        each per-block estimate). The closed-form fixed-point refine (see
-        Algorithm) typically converges in well under 10 iterations for a
-        carrier that isn't near the Nyquist limit; raise it for a very high
-        carrier, or lower it if profiling shows it converges sooner.
+        Maximum refinement iterations after each coarse FFT, for the
+        full-field estimate and for every block.
     window : bool, default True
-        Apply a 2D Hann window before each coarse FFT to reduce spectral
-        leakage from the field's edges (recommended; skipped automatically
-        if the field being estimated has a size-1 axis).
+        Apply a 2-D Hann window before each coarse FFT; skipped when the field
+        has a size-1 axis.
     defocus : bool, default True
-        Also fit and remove a quadratic curvature term
-        ``kxx*x^2 + kyy*y^2 + kxy*x*y``, via the block-regression method
-        above. Defaults on since most off-axis interferometry setups carry
-        at least mild curvature from the reference wavefront; disable only
-        for a field known to be curvature-free.
+        Also fit and remove the quadratic curvature term.
     n_blocks : int, default 10
-        Grid size (``n_blocks x n_blocks``) for the curvature pre-estimate.
-        Only used when ``defocus=True``. Needs at least 4 blocks with
-        usable weight to fit (5 unknowns, 2 equations/block); falls back
-        to ``kxx=kyy=kxy=0`` (with a warning) if fewer are available --
-        e.g. too small an image for the requested grid, or ``weight``/
-        ``mask`` leaving too little usable area.
+        Grid size for the curvature estimate, used only when ``defocus`` is
+        set. Needs at least 4 blocks with usable weight; otherwise the
+        curvature is skipped with a warning.
     device : {"auto", "cpu", "cuda"}, default "auto"
-        Where to run -- see :func:`phase.backend.to_device` for the full
-        explanation. ``phi``/``weight``/``mask`` are uploaded if
-        needed; the result's ``phi`` field stays on that same device rather
-        than being downloaded automatically.
+        Device to run on; see :func:`phase_shift.backend.to_device`.
 
     Returns
     -------
     CarrierResult
-        See :class:`CarrierResult`. ``phi`` is the object phase with the
-        carrier (and curvature, if requested) and piston removed; ``kx,
-        ky`` (rad/pixel) / ``fx, fy`` (cycles/pixel) describe the removed
-        linear carrier; ``kxx, kyy, kxy`` (rad/pixel^2) the removed
-        curvature terms (all ``0.0`` if not requested); ``piston`` the
-        removed constant offset.
+        Flattened phase and the removed carrier, curvature, and piston.
 
-    Notes
+    Raises
+    ------
+    ValueError
+        If ``phi`` is not 2-D, if ``weight`` or ``mask`` does not have
+        ``phi``'s shape, if ``n_blocks`` is below 1, or if ``refine_iters`` is
+        negative.
+
+    Warns
     -----
-    The block-regression estimate is exact for a pure carrier+curvature
-    field with no other structure; on real data any genuine object phase
-    with local structure comparable to
-    the block size will mildly bias individual blocks' tilt estimates,
-    the usual resolution/robustness trade-off of a block size -- fewer,
-    larger blocks average out more of that bias but track less localized
-    curvature. If ``kxx`` and ``kyy`` come back similar and ``kxy`` near
-    0, the curvature is essentially isotropic (a spherical wavefront); if
-    they differ substantially, that's astigmatism or a tilted/off-axis
-    reference, both handled by this general form.
+    UserWarning
+        If the curvature fit is under-determined; see
+        :func:`_estimate_curvature`.
     """
+    if phi.ndim != 2:
+        raise ValueError(f"phi must be 2-D (H, W), got shape {phi.shape}")
+    if n_blocks < 1:
+        raise ValueError(f"n_blocks must be at least 1, got {n_blocks}")
+    if refine_iters < 0:
+        raise ValueError(f"refine_iters must be non-negative, got {refine_iters}")
+
     phi = to_device(phi, device=device)
     xp = get_array_module(phi)
     H, W = phi.shape
     c = xp.exp(1j * phi)
+    w = _estimation_weight(phi, weight, mask, device)
 
-    w = xp.ones((H, W)) if weight is None else xp.clip(to_device(weight, device=device), 0, None)
-    if mask is not None:
-        w = w * to_device(mask, device=device, dtype=bool)
-    if float(w.sum()) <= 0:
-        w = xp.ones((H, W))
-
-    X, Y = xp.meshgrid(xp.arange(W, dtype=xp.float64), xp.arange(H, dtype=xp.float64))
+    x = xp.arange(W, dtype=xp.float64)[None, :]                          # (1, W)
+    y = xp.arange(H, dtype=xp.float64)[:, None]                          # (H, 1)
 
     kxx = kyy = kxy = 0.0
     if defocus:
         kxx, kyy, kxy = _estimate_curvature(c, w, window, refine_iters, n_blocks)
         if kxx or kyy or kxy:
-            c = c * xp.exp(-1j * (kxx * X**2 + kyy * Y**2 + kxy * X * Y))
+            c = c * xp.exp(-1j * (kxx * x**2 + kyy * y**2 + kxy * x * y))
 
     fx, fy = _estimate_tilt(c, w, window, refine_iters)
 
-    # demodulate the (curvature-corrected) carrier, then remove the piston
-    d = c * xp.exp(-1j * 2 * xp.pi * (fx * X + fy * Y))
+    d = c * xp.exp(-1j * 2 * xp.pi * (fx * x + fy * y))
     piston = float(xp.angle(xp.sum(w * d)))
     d = d * xp.exp(-1j * piston)
-    phi_flat = xp.angle(d)
 
-    kx = 2 * np.pi * fx
-    ky = 2 * np.pi * fy
-    return CarrierResult(phi=phi_flat, kx=kx, ky=ky, fx=fx, fy=fy,
-                          kxx=kxx, kyy=kyy, kxy=kxy, piston=piston)
+    return CarrierResult(phi=xp.angle(d), kx=2 * np.pi * fx, ky=2 * np.pi * fy,
+                         fx=fx, fy=fy, kxx=kxx, kyy=kyy, kxy=kxy, piston=piston)

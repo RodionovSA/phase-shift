@@ -12,8 +12,6 @@ Public API, re-exported here regardless of which submodule a name lives in:
 - :mod:`phase.frame_contrast` -- ``measure_frame_contrast``, ``measure_frame_visibility``
 - :mod:`phase.carrier` -- ``remove_carrier``, ``CarrierResult``
 - :mod:`phase.reference` -- ``subtract_reference``, ``DifferenceResult``
-- :mod:`phase.ripple` -- ``estimate_phase_ripple``, ``apply_phase_ripple``,
-  ``RippleResult``
 - :mod:`phase.combine` -- ``combine_acquisitions``, ``CombinedResult``
 - :mod:`phase.backend` -- NumPy/CuPy array-module dispatch shared by all of
   the above; every function accepts a ``device="auto"|"cpu"|"cuda"``
@@ -27,7 +25,6 @@ from .backend import asnumpy
 from .carrier import CarrierResult, remove_carrier
 from .combine import CombinedResult, combine_acquisitions
 from .reference import DifferenceResult, subtract_reference
-from .ripple import RippleResult, apply_phase_ripple, estimate_phase_ripple
 from .config import PhaseConfig
 from .frame_contrast import measure_frame_contrast, measure_frame_visibility
 from .interference_model import model_stack
@@ -48,9 +45,6 @@ __all__ = [
     "remove_carrier",
     "DifferenceResult",
     "subtract_reference",
-    "RippleResult",
-    "estimate_phase_ripple",
-    "apply_phase_ripple",
     "CombinedResult",
     "combine_acquisitions",
     "backend",
