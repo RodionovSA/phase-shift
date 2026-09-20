@@ -1,26 +1,55 @@
-"""Registry of phase-recovery method implementations for :class:`phase_shift.solver.PhaseSolver`.
+# src/phase_shift/methods/__init__.py
+"""Registry of phase-recovery methods for :class:`phase_shift.solver.PhaseSolver`.
 
-Each entry maps a method name to a callable
-``(stack, g, fit_gain=False, dtype=None, **method_kwargs) -> (a, b, phi, delta, g, method_param)``,
-matching Eq. (8) of ``docs/interference_model.md``. The returned ``g`` is the
-input ``g`` passed through unchanged when ``fit_gain=False``, or the
-per-frame contrast jointly recovered alongside ``delta`` (normalized to
-``median(g) = 1``) when ``fit_gain=True`` -- see :func:`phase.methods.aia.aia`
-for the reference implementation. Add a method by writing such a function in
-its own module here and registering it below -- :data:`phase_shift.methods.METHODS`
-is derived from this dict's keys, nothing else changes.
+Each entry maps a name to a callable
+``(stack, g, fit_gain=False, dtype=None, precise_reduce=True, **method_kwargs)
+-> (a, b, phi, delta, g, method_param)``, the fields of
+``docs/interference_model.md`` Eq. (17). The returned ``g`` is the input passed
+through unchanged when ``fit_gain`` is False, else the gain fitted alongside
+``delta`` with ``median(g) = 1``.
+
+Add a method as its own module here plus one entry below; :data:`METHODS`
+follows from the keys and nothing else changes. The building blocks the
+methods share are re-exported here too: the alternating least-squares steps
+(:mod:`phase_shift.methods.steps`), the gauge conventions
+(:mod:`phase_shift.methods.gauge`), and the accuracy diagnostics
+(:mod:`phase_shift.methods.diagnostics`).
 """
 
-from .base import MethodParam
 from .aia import aia
-from .sf_aia import aia_step_field
+from .base import MethodParam
+from .diagnostics import AIAParam, aia_diagnostics, chunked_sigma, cond2
+from .gauge import (center_coeffs, center_offsets, normalize_gain, pin_phase_origin,
+                    whiten_uv)
+from .sf_aia import StepFieldParam, aia_step_field, fit_step_field, step_field_quality
+from .steps import frame_step, pixel_design, pixel_step
 
 METHOD_REGISTRY = {
     "aia": aia,
-    "aia_step_field": aia_step_field,
-    # Kept as an alias (degree defaults to 1, a pure linear tilt) so
-    # existing configs/notebooks written against the old name keep working.
-    "aia_tilt": aia_step_field,
+    "sf_aia": aia_step_field,
 }
 
 METHODS = list(METHOD_REGISTRY)
+
+__all__ = [
+    "METHOD_REGISTRY",
+    "METHODS",
+    "MethodParam",
+    "aia",
+    "aia_step_field",
+    "AIAParam",
+    "StepFieldParam",
+    "pixel_step",
+    "frame_step",
+    "pixel_design",
+    "fit_step_field",
+    "step_field_quality",
+    "whiten_uv",
+    "pin_phase_origin",
+    "normalize_gain",
+    "center_offsets",
+    "center_coeffs",
+    "aia_diagnostics",
+    "chunked_sigma",
+    "cond2",
+]

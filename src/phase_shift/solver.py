@@ -6,7 +6,6 @@ from numpy.typing import DTypeLike
 
 from .backend import get_array_module, to_device
 from .config import PhaseConfig
-from .errors import compute_phi_error
 from .interference_model import model_stack
 from .methods import METHOD_REGISTRY, MethodParam
 from .result import PhaseResult
@@ -212,8 +211,8 @@ class PhaseSolver:
         """Per-pixel phase standard deviation of the fit.
 
         Uses ``config.noise_std`` as ``sigma_0`` when given, otherwise the
-        per-pixel RMS fit residual; see
-        :func:`phase_shift.errors.compute_phi_error`.
+        per-pixel RMS fit residual, and asks the method for its own map; see
+        :meth:`phase_shift.methods.base.MethodParam.phi_error`.
 
         Parameters
         ----------
@@ -244,6 +243,9 @@ class PhaseSolver:
             noise_std = to_device(self.config.noise_std, device=self.device, dtype=b.dtype)
         else:
             noise_std = xp.sqrt(residual_mean_sq)
-        return compute_phi_error(self.config.method, b, phi, delta, g, fit_gain,
-                                 noise_std, self.config.phi_error_simplified,
-                                 method_param, xp)
+        if noise_std.shape != phi.shape:
+            raise ValueError(
+                f"noise_std shape {noise_std.shape} does not match phi shape {phi.shape}"
+            )
+        return method_param.phi_error(b, phi, delta, g, fit_gain, noise_std,
+                                      self.config.phi_error_simplified, xp)

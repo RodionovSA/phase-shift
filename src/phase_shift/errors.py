@@ -1,129 +1,58 @@
-"""Per-pixel phase-error maps for :class:`phase_shift.result.PhaseResult.phi_error`.
+# src/phase_shift/errors.py
+"""Shared phase-error derivations for the AIA family.
 
-Computed from a method's *output* (``b, phi, delta, g``), not from inside the
-method itself -- see ``docs/aia.md`` "Direct phase-error computation" for the
-derivation (Eq. 21-38) and ``docs/sf_aia.md`` §9 (Eq. E5-E9)
-for the ``aia_step_field``/``aia_tilt`` extension. :func:`compute_phi_error`
-is the single entry point :class:`phase_shift.solver.PhaseSolver` calls; it
-dispatches on ``method`` and currently computes a result for ``"aia"`` and
-``"aia_step_field"``/``"aia_tilt"`` -- every other registered method gets
-``None``, since no closed-form error expression has been derived for it.
+Computed from a method's output (``b, phi, delta, g``) rather than inside the
+solve: ``docs/aia.md`` §"Phase-error covariance" for the baseline and the
+Stage-2/3 corrections, ``docs/sf_aia.md`` §"Noise of the corrected solve" for
+the step-field term. Each method exposes its own map through
+:meth:`phase_shift.methods.base.MethodParam.phi_error`; the functions here are
+the pieces those share.
 """
 
-from typing import Optional, Tuple
+from types import ModuleType
 
 import numpy as np
 
-from .methods.sf_aia import _poly_basis
 
+def aia_phi_error_parts(b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: np.ndarray,
+                         fit_gain: bool, sigma0: np.ndarray, simplified: bool,
+                         xp: ModuleType) -> tuple[np.ndarray, np.ndarray | None]:
+    """``docs/aia.md``'s AIA phase-error map, Eq. (26) plus the Stage-2/3 correction.
 
-def compute_phi_error(method: str, b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
-                       g: np.ndarray, fit_gain: bool, noise_std: np.ndarray,
-                       simplified: bool, method_param, xp) -> Optional[np.ndarray]:
-    """Dispatch to the per-method phase-error implementation.
-
-    Parameters
-    ----------
-    method : str
-        ``PhaseConfig.method``. ``"aia"`` and ``"aia_step_field"``/
-        ``"aia_tilt"`` (case-insensitive, matching
-        :data:`phase.methods.METHOD_REGISTRY`'s own aliasing) are
-        implemented; every other value returns ``None``.
-    b, phi : np.ndarray, shape (H, W)
-        Fitted fringe amplitude and wrapped phase.
-    delta, g : np.ndarray, shape (N,)
-        Fitted per-frame phase steps and gain.
-    fit_gain : bool
-        Whether ``g`` was jointly fitted (``docs/aia.md``'s Stage 3) or held
-        fixed (Stage 2) -- selects which correction term Eq. (38) includes.
-    noise_std : np.ndarray, shape (H, W)
-        Per-pixel camera noise std, ``docs/aia.md``'s ``sigma_0(x, y)``
-        (Eq. 27a) -- either ``PhaseConfig.noise_std``, or, when that's
-        ``None``, :meth:`PhaseSolver.fit`'s own per-pixel residual map
-        (the frame-averaged reconstruction residual, kept as a map rather
-        than pooled into the scalar ``reconstruction_error``). Shape must
-        match ``phi``.
-    simplified : bool
-        If True, return Eq. (22)'s baseline only, dropping the ``delta_n``/
-        ``g_n`` uncertainty correction (Eq. 34/38) and, for
-        ``aia_step_field``, the step-field leverage discount (Eq. E9) --
-        both are ``O(1/N_p)`` relative to the baseline.
-    method_param : MethodParam
-        The fitted result's own diagnostics (e.g. an
-        :class:`phase.methods.sf_aia.StepFieldParam` for
-        ``method="aia_step_field"``) -- only its ``.degree`` is used here,
-        to rebuild the step-field basis.
-    xp : module
-        ``numpy`` or ``cupy``, matching ``b``/``phi``/``delta``/``g``.
-
-    Returns
-    -------
-    np.ndarray, shape (H, W), or None
-        ``sigma_Phi(x, y)`` in radians for a supported method; ``None``
-        otherwise.
-
-    Raises
-    ------
-    ValueError
-        If ``noise_std``'s shape does not match ``phi``.
-    """
-    if noise_std.shape != phi.shape:
-        raise ValueError(
-            f"noise_std shape {noise_std.shape} does not match phi shape {phi.shape}"
-        )
-    method = method.lower()
-    if method == "aia":
-        phi_var, _ = _aia_phi_error_parts(b, phi, delta, g, fit_gain, noise_std,
-                                           simplified, xp)
-        return xp.sqrt(phi_var)
-    if method in ("aia_step_field", "aia_tilt"):
-        return _aia_step_field_phi_error(b, phi, delta, g, fit_gain, noise_std,
-                                          simplified, method_param.degree, xp)
-    return None
-
-
-def _aia_phi_error_parts(b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: np.ndarray,
-                          fit_gain: bool, sigma0, simplified: bool, xp
-                          ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-    """``docs/aia.md``'s AIA phase-error map, Eq. (22) plus Eq. (34)/(38).
-
-    Factored out of :func:`compute_phi_error`'s plain-``aia`` branch so
-    :func:`_aia_step_field_phi_error` can reuse ``w_dot_k`` (built from
-    Eq. 29's leverage vectors) rather than recomputing it -- the step-field
-    discount (``docs/sf_aia.md`` Eq. E9) needs the same
-    quantity as Eq. (34)/(38)'s own correction term.
+    Returns ``w_dot_k`` alongside the variance so
+    :func:`step_field_phi_error` can reuse Eq. (34)'s leverage vectors
+    instead of rebuilding them.
 
     Parameters
     ----------
     b, phi : np.ndarray, shape (H, W)
     delta, g : np.ndarray, shape (N,)
     fit_gain : bool
-        Include Eq. (38)'s ``g_n`` term (Stage 3) when True, Eq. (34)'s
-        ``delta_n``-only term (Stage 2) when False.
+        Include the fitted-gain sensitivity of Eq. (39) (Stage 3) as well as
+        the phase-step one of Eq. (33) (Stage 2).
     sigma0 : np.ndarray, shape (H, W), or float
     simplified : bool
-        Skip the correction term entirely when True.
+        Return the Eq. (26) baseline alone.
     xp : module
 
     Returns
     -------
     phi_var : np.ndarray, shape (H, W)
-        ``sigma_Phi(x, y)^2``, Eq. (22) alone if ``simplified`` else plus
-        Eq. (34)/(38).
+        ``sigma_Phi(x, y)^2``: Eq. (26) alone when ``simplified``, else with
+        the Stage-2/3 correction.
     w_dot_k : np.ndarray, shape (N, H, W), or None
-        ``w(x,y) . k_n`` (Eq. 29's leverage vectors dotted with
-        ``(sin(phi), cos(phi))``), working dtype; ``None`` if
-        ``simplified`` (nothing downstream needs it then).
+        Eq. (34)'s leverage vectors dotted with ``(sin(phi), cos(phi))``, in
+        the working dtype; ``None`` when ``simplified``.
     """
     work = b.dtype
     delta64 = xp.asarray(delta, dtype=xp.float64)
     g64 = xp.asarray(g, dtype=xp.float64)
     N = delta64.shape[0]
 
-    # Frame-side quantities (Eqs. 20a, 21, 29) -- small, float64 regardless
+    # Frame-side quantities (Eq. 23-25) -- small, float64 regardless
     # of b/phi's working dtype, same convention as phase.methods.aia's own
     # normal-equation solves. Cast to `work` right before use against a big
-    # (H, W)/(N, H, W) array, same as aia_pixel_step's own
+    # (H, W)/(N, H, W) array, same as pixel_step's own
     # `pinv(A).astype(work_dtype) @ stack` -- otherwise ordinary promotion
     # silently turns every big array below float64 too.
     d = xp.stack([xp.cos(delta64), xp.sin(delta64)])                     # (2, N)
@@ -137,7 +66,7 @@ def _aia_phi_error_parts(b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: n
     b2 = xp.maximum(b ** 2, eps)
     w = xp.stack([xp.sin(phi), xp.cos(phi)])                             # (2, H, W)
 
-    # Eq. (22): Stage-1 baseline.
+    # Eq. (26): Stage-1 baseline.
     phi_var = sigma0 ** 2 / (N * b2) * xp.einsum('ahw,ab,bhw->hw', w, C_inv_w, w)
 
     if simplified:
@@ -145,39 +74,35 @@ def _aia_phi_error_parts(b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: n
 
     Np = b.size
     b2_mean = xp.mean(b2)
-    sigma_eff_sq = xp.mean(sigma0 ** 2 * b2) / b2_mean                    # Eq. (33)
+    sigma_eff_sq = xp.mean(sigma0 ** 2 * b2) / b2_mean                    # Eq. (37)
     g_w = g64.astype(work)
     delta_w = delta64.astype(work)
 
     r = g64[None, :] * d - R[:, None]                                    # (2, N)
-    k = ((C_inv @ r) / N).astype(work)                                   # (2, N), Eq. (29)
+    k = ((C_inv @ r) / N).astype(work)                                   # (2, N), Eq. (34)
     w_dot_k = xp.einsum('ahw,an->nhw', w, k)                             # (N, H, W)
 
     dI_ddelta = -g_w[:, None, None] * b[None, :, :] \
-        * xp.sin(phi[None, :, :] + delta_w[:, None, None])               # (N, H, W), Eq. (28)
+        * xp.sin(phi[None, :, :] + delta_w[:, None, None])               # (N, H, W), Eq. (33)
     term = dI_ddelta ** 2 / g_w[:, None, None] ** 2
     if fit_gain:
-        dI_dg = b[None, :, :] * xp.cos(phi[None, :, :] + delta_w[:, None, None])  # Eq. (35)
+        dI_dg = b[None, :, :] * xp.cos(phi[None, :, :] + delta_w[:, None, None])  # Eq. (39)
         term = term + dI_dg ** 2
 
+    # Eq. (33)/(39) sensitivities against the Eq. (37)/(40) variances.
     correction = (2 * sigma_eff_sq / (Np * b2_mean * b2)) \
-        * xp.sum(term * w_dot_k ** 2, axis=0)                            # Eq. (34)/(38)
+        * xp.sum(term * w_dot_k ** 2, axis=0)
     return phi_var + correction, w_dot_k
 
 
-def _aia_step_field_phi_error(b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
+def step_field_phi_error(b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
                                g: np.ndarray, fit_gain: bool, sigma0,
-                               simplified: bool, degree: int, xp) -> np.ndarray:
-    """``docs/sf_aia.md``'s AIA-with-step-field phase-error map, Eq. (E9).
+                               simplified: bool, basis: np.ndarray, xp) -> np.ndarray:
+    """``docs/sf_aia.md``'s step-field phase-error map.
 
-    ``docs/aia.md``'s Eq. (22)/(34)/(38) (via :func:`_aia_phi_error_parts`)
-    discounted by the step-field fit's own leverage (Eq. E7): each frame's
-    effective noise at a pixel is *reduced* by ``(1 - h_n(x,y))``, since
-    Eq. (E1)'s per-frame fit is built from that same pixel's own residual.
-    Reuses Eq. (29)'s leverage vectors ``k`` rather than a per-pixel 3x3
-    solve -- an exact algebraic identity (`D_n = sigma0^2(1-h_n)` splits
-    linearly, and the ``h_n`` piece collapses onto the same ``k``), not an
-    approximation.
+    The AIA map of :func:`aia_phi_error_parts` combined with the step field's
+    own contribution, §"Noise of the corrected solve". Reuses Eq. (34)'s
+    leverage vectors ``k`` rather than a per-pixel 3x3 solve.
 
     Parameters
     ----------
@@ -186,15 +111,12 @@ def _aia_step_field_phi_error(b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
     fit_gain : bool
     sigma0 : np.ndarray, shape (H, W), or float
     simplified : bool
-        Skip both Eq. (34)/(38)'s correction and this function's own
-        leverage discount when True -- both are ``O(1/N_p)``, dropped
-        together for consistency.
-    degree : int
-        Highest total polynomial degree of the fitted step field (
-        :attr:`phase.methods.sf_aia.StepFieldParam.degree`); ``0``
-        means no step field (:func:`phase.methods.sf_aia._poly_basis`
-        returns an empty basis), so the discount is identically zero and
-        this reduces to the plain-``aia`` result.
+        Return the Eq. (26) baseline alone, dropping both the Stage-2/3
+        correction and the step-field term; both are ``O(1/N_p)``.
+    basis : np.ndarray, shape (J, P)
+        The step field's basis, from :func:`phase_shift.basis.spatial_basis`.
+        An empty basis makes the discount identically zero, reducing this to
+        the plain-``aia`` result.
     xp : module
 
     Returns
@@ -202,13 +124,13 @@ def _aia_step_field_phi_error(b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
     np.ndarray, shape (H, W)
         ``sigma_Phi(x, y)``, in radians.
     """
-    phi_var, w_dot_k = _aia_phi_error_parts(b, phi, delta, g, fit_gain, sigma0, simplified, xp)
+    phi_var, w_dot_k = aia_phi_error_parts(b, phi, delta, g, fit_gain, sigma0, simplified, xp)
     if simplified:
         return xp.sqrt(phi_var)
 
     H, W = phi.shape
     work = b.dtype
-    basis = _poly_basis(H, W, degree, xp).astype(work, copy=False)        # (J, P)
+    basis = basis.astype(work, copy=False)                                # (J, P)
     J = basis.shape[0]
     if J == 0:
         return xp.sqrt(phi_var)
@@ -219,20 +141,15 @@ def _aia_step_field_phi_error(b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
     Q_n = (g64 * xp.sin(delta64)).astype(work)
     u = (b * xp.cos(phi)).reshape(-1)
     v = (-b * xp.sin(phi)).reshape(-1)
-    w_n = Q_n[:, None] * u[None, :] - P_n[:, None] * v[None, :]           # (N, P), Eq. (E5)
+    w_n = Q_n[:, None] * u[None, :] - P_n[:, None] * v[None, :]           # (N, P), Eq. (T7)
     w_n_sq = w_n ** 2
 
-    # Eq. (E1)'s own w_n^2-weighted Gram matrix, one (J, J) solve per frame
-    # -- the same computation fit_step_field does internally, recomputed
-    # here from data already in hand rather than threading a new return
-    # value through phase/methods/sf_aia.py. Kept in the working dtype
-    # throughout (unlike the frame-side-only C/C_inv above): G is a
-    # reduction over the big (N, P) data, not a small per-iteration object,
-    # so the same "cast big arrays down, not small ones up" rule as
-    # _aia_phi_error_parts applies here to the reduction's inputs.
+    # Eq. (E1)'s w_n^2-weighted Gram matrix, one (J, J) solve per frame, in
+    # the working dtype: G reduces over the big (N, P) data, so its inputs
+    # are cast down rather than up.
     G = xp.einsum('np,jp,kp->njk', w_n_sq, basis, basis)                  # (N, J, J)
     G_inv = xp.linalg.pinv(G)
-    h = w_n_sq * xp.einsum('jp,njk,kp->np', basis, G_inv, basis)          # (N, P), Eq. (E7)
+    h = w_n_sq * xp.einsum('jp,njk,kp->np', basis, G_inv, basis)          # (N, P)
     h = h.reshape(-1, H, W)
 
     b2 = xp.maximum(b ** 2, xp.asarray(xp.finfo(xp.float64).eps, dtype=work))

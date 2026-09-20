@@ -18,8 +18,9 @@ from phase_shift import (
     subtract_reference,
 )
 from phase_shift.backend import CUPY_AVAILABLE
+from phase_shift.basis import spatial_basis
+from phase_shift.methods.sf_aia import step_field_quality
 from phase_shift.utils import wrap
-from phase_shift.methods.sf_aia import _poly_basis, step_field_quality
 
 
 def circ_rms_deg(a: np.ndarray, b: np.ndarray) -> float:
@@ -112,13 +113,13 @@ class TestPhaseConfig:
 
     def test_yaml_roundtrip(self, tmp_path):
         p = tmp_path / "config.yaml"
-        cfg = PhaseConfig(use_alpha=False, gain_mode="none", method="aia_tilt",
+        cfg = PhaseConfig(use_alpha=False, gain_mode="none", method="sf_aia",
                            method_kwargs={"iters": 5}, precise_reduce=False)
         cfg.to_yaml(p)
         cfg2 = PhaseConfig.from_yaml(p)
         assert cfg2.use_alpha is False
         assert cfg2.gain_mode == "none"
-        assert cfg2.method == "aia_tilt"
+        assert cfg2.method == "sf_aia"
         assert cfg2.method_kwargs == {"iters": 5}
         assert cfg2.precise_reduce is False
 
@@ -149,7 +150,7 @@ class TestAIA:
         assert r32.result.method_param.converged == r64.result.method_param.converged
 
     def test_precise_reduce_false_close_to_true(self):
-        # precise_reduce only changes which dtype aia_frame_step's
+        # precise_reduce only changes which dtype frame_step's
         # stack-scale reduction runs in (src/phase_shift/methods/aia.py) -- the
         # recovered phase should be indistinguishable at the same threshold
         # test_dtype_float32_close_to_float64 already uses for a genuine
@@ -203,7 +204,7 @@ class TestAIA:
         with its public building blocks and checking the residual never
         increases round over round (the c_n-consistency fix, see aia.py).
         """
-        from phase_shift.methods.aia import aia_frame_step, aia_pixel_step
+        from phase_shift.methods.steps import frame_step, pixel_step
 
         stack, _ = make_stack(seed=10, N=14)
         N = stack.shape[0]
@@ -219,9 +220,9 @@ class TestAIA:
         c = np.zeros(N)
         costs = []
         for _ in range(20):
-            a, u, v = aia_pixel_step(I - c[:, None], delta, g)
+            a, u, v = pixel_step(I - c[:, None], delta, g)
             costs.append(joint_cost(a, u, v, c, delta, g))
-            new_delta, new_g, new_c = aia_frame_step(I, u, v)
+            new_delta, new_g, new_c = frame_step(I, u, v)
             delta = new_delta - new_delta[0]
             c = new_c - new_c.mean()
             g = new_g / np.median(new_g)
@@ -243,7 +244,7 @@ class TestAIA:
 
 class TestStepField:
     def test_poly_basis_orthonormal_and_zero_mean(self):
-        basis = _poly_basis(20, 24, 2, np)
+        basis = spatial_basis(20, 24, "poly", np, degree=2)
         assert basis.shape[0] == 5   # x, y, x^2, xy, y^2
         assert np.allclose(basis @ basis.T, np.eye(5), atol=1e-8)
         assert np.allclose(basis.mean(axis=1), 0, atol=1e-10)
@@ -251,10 +252,10 @@ class TestStepField:
     def test_quadratic_step_field_needs_higher_degree(self):
         stack, _ = make_step_field_stack(kind="quadratic")
         kw = dict(iters=40, tol=1e-6, refine_iters=8, refine_tol=1e-8, crop=5)
-        cfg1 = PhaseConfig(use_alpha=False, gain_mode="none", method="aia_step_field",
-                            method_kwargs=dict(degree=1, **kw))
-        cfg2 = PhaseConfig(use_alpha=False, gain_mode="none", method="aia_step_field",
-                            method_kwargs=dict(degree=2, **kw))
+        cfg1 = PhaseConfig(use_alpha=False, gain_mode="none", method="sf_aia",
+                            method_kwargs=dict(basis_kwargs=dict(degree=1), **kw))
+        cfg2 = PhaseConfig(use_alpha=False, gain_mode="none", method="sf_aia",
+                            method_kwargs=dict(basis_kwargs=dict(degree=2), **kw))
         r1 = PhaseSolver(cfg1).fit(stack)
         r2 = PhaseSolver(cfg2).fit(stack)
         assert r2.result.reconstruction_error < 0.5 * r1.result.reconstruction_error
@@ -262,8 +263,8 @@ class TestStepField:
     def test_linear_tilt_recovered_at_degree1(self):
         stack, _ = make_step_field_stack(kind="linear")
         cfg_plain = PhaseConfig(use_alpha=False, gain_mode="none", method="aia")
-        cfg_tilt = PhaseConfig(use_alpha=False, gain_mode="none", method="aia_step_field",
-                                method_kwargs=dict(iters=40, tol=1e-6, degree=1,
+        cfg_tilt = PhaseConfig(use_alpha=False, gain_mode="none", method="sf_aia",
+                                method_kwargs=dict(iters=40, tol=1e-6, basis_kwargs=dict(degree=1),
                                                     refine_iters=8, refine_tol=1e-8, crop=5))
         r_plain = PhaseSolver(cfg_plain).fit(stack)
         r_tilt = PhaseSolver(cfg_tilt).fit(stack)
@@ -273,10 +274,10 @@ class TestStepField:
         # Same linear-tilt field as test_linear_tilt_recovered_at_degree1,
         # but with per-frame gain drift added -- gain_mode="joint" must
         # recover both the tilt and the drift together, plumbed through the
-        # step-field refine loop's own re-fitted g (see aia_step_field).
+        # step-field refine loop's own re-fitted g (see sf_aia).
         stack, truth = make_step_field_stack(kind="linear", gain_std=0.3)
-        cfg_tilt = PhaseConfig(use_alpha=False, gain_mode="joint", method="aia_step_field",
-                                method_kwargs=dict(iters=40, tol=1e-6, degree=1,
+        cfg_tilt = PhaseConfig(use_alpha=False, gain_mode="joint", method="sf_aia",
+                                method_kwargs=dict(iters=40, tol=1e-6, basis_kwargs=dict(degree=1),
                                                     refine_iters=8, refine_tol=1e-8, crop=5))
         r_tilt = PhaseSolver(cfg_tilt).fit(stack)
         assert r_tilt.result.reconstruction_error < 0.05
@@ -284,27 +285,30 @@ class TestStepField:
 
     def test_frame_independent_aberration_absorbed_into_phase(self):
         stack, _ = make_step_field_stack(kind="static_quadratic")
-        cfg = PhaseConfig(use_alpha=False, gain_mode="none", method="aia_step_field",
-                           method_kwargs=dict(iters=40, tol=1e-6, degree=2,
+        cfg = PhaseConfig(use_alpha=False, gain_mode="none", method="sf_aia",
+                           method_kwargs=dict(iters=40, tol=1e-6, basis_kwargs=dict(degree=2),
                                                refine_iters=8, refine_tol=1e-8, crop=5))
         r = PhaseSolver(cfg).fit(stack)
         assert r.result.reconstruction_error < 0.05
 
-    def test_aia_tilt_alias_matches_degree1(self):
+    def test_default_basis_matches_explicit_degree1(self):
+        # the default basis must stay a degree-1 polynomial, a pure tilt
         stack, _ = make_step_field_stack(kind="linear")
         kw = dict(iters=40, tol=1e-6, refine_iters=8, refine_tol=1e-8, crop=5)
-        cfg_alias = PhaseConfig(use_alpha=False, gain_mode="none", method="aia_tilt", method_kwargs=kw)
-        cfg_explicit = PhaseConfig(use_alpha=False, gain_mode="none", method="aia_step_field",
-                                    method_kwargs=dict(degree=1, **kw))
-        r_alias = PhaseSolver(cfg_alias).fit(stack).result
+        cfg_default = PhaseConfig(use_alpha=False, gain_mode="none", method="sf_aia",
+                                   method_kwargs=kw)
+        cfg_explicit = PhaseConfig(use_alpha=False, gain_mode="none", method="sf_aia",
+                                    method_kwargs=dict(basis_kwargs=dict(degree=1), **kw))
+        r_default = PhaseSolver(cfg_default).fit(stack).result
         r_explicit = PhaseSolver(cfg_explicit).fit(stack).result
-        assert r_alias.reconstruction_error == pytest.approx(r_explicit.reconstruction_error)
+        assert r_default.method_param.basis_kwargs.get("degree", 1) == 1
+        assert r_default.reconstruction_error == pytest.approx(r_explicit.reconstruction_error)
 
     def test_degree0_matches_plain_aia(self):
         stack, _ = make_step_field_stack(kind="quadratic")
         cfg_plain = PhaseConfig(use_alpha=False, gain_mode="none", method="aia")
-        cfg_deg0 = PhaseConfig(use_alpha=False, gain_mode="none", method="aia_step_field",
-                                method_kwargs=dict(degree=0, refine_iters=5, crop=5))
+        cfg_deg0 = PhaseConfig(use_alpha=False, gain_mode="none", method="sf_aia",
+                                method_kwargs=dict(basis_kwargs=dict(degree=0), refine_iters=5, crop=5))
         r_plain = PhaseSolver(cfg_plain).fit(stack).result
         r_deg0 = PhaseSolver(cfg_deg0).fit(stack).result
         mp = r_deg0.method_param
@@ -315,15 +319,15 @@ class TestStepField:
         assert mp.best_iter == -1
 
     def test_precise_reduce_false_close_to_true(self):
-        # Same equivalence check as TestAIA's, for aia_step_field's own
-        # stack-scale reductions (aia_frame_step inside the refine loop,
+        # Same equivalence check as TestAIA's, for sf_aia's own
+        # stack-scale reductions (frame_step inside the refine loop,
         # step_field_quality's model/resid reconstruction, and its RMS
         # ratio -- all in src/phase_shift/methods/sf_aia.py).
         stack, truth = make_step_field_stack(kind="linear", gain_std=0.3)
-        kw = dict(iters=40, tol=1e-6, degree=1, refine_iters=8, refine_tol=1e-8, crop=5)
-        cfg_precise = PhaseConfig(use_alpha=False, gain_mode="joint", method="aia_step_field",
+        kw = dict(iters=40, tol=1e-6, basis_kwargs=dict(degree=1), refine_iters=8, refine_tol=1e-8, crop=5)
+        cfg_precise = PhaseConfig(use_alpha=False, gain_mode="joint", method="sf_aia",
                                    method_kwargs=kw, precise_reduce=True)
-        cfg_fast = PhaseConfig(use_alpha=False, gain_mode="joint", method="aia_step_field",
+        cfg_fast = PhaseConfig(use_alpha=False, gain_mode="joint", method="sf_aia",
                                 method_kwargs=kw, precise_reduce=False)
         r_precise = PhaseSolver(cfg_precise).fit(stack).result
         r_fast = PhaseSolver(cfg_fast).fit(stack).result
@@ -344,7 +348,7 @@ class TestStepField:
         # behavior) and stack's own dtype -- never float64 -- when not,
         # even though none of a/u/v/basis/coeffs/delta arrive pre-cast to
         # stack's dtype (basis in particular is always float64 from
-        # _poly_basis).
+        # spatial_basis).
         rng = np.random.default_rng(2)
         N, H, W = 10, 40, 50
         P = H * W
@@ -353,7 +357,7 @@ class TestStepField:
         u = rng.random(P).astype(np.float32)
         v = rng.random(P).astype(np.float32)
         delta = np.sort(rng.uniform(0, 2 * np.pi, N))
-        basis = _poly_basis(H, W, 1, np)
+        basis = spatial_basis(H, W, "poly", np, degree=1)
         coeffs = rng.standard_normal((basis.shape[0], N)) * 0.01
 
         rms_precise, resid_precise = step_field_quality(
@@ -383,8 +387,8 @@ class TestStepField:
 
         monkeypatch.setattr(sf, "step_field_quality", fake_quality)
 
-        cfg = PhaseConfig(use_alpha=False, gain_mode="none", method="aia_step_field",
-                           method_kwargs=dict(degree=2, refine_iters=4, refine_tol=1e-3, crop=2))
+        cfg = PhaseConfig(use_alpha=False, gain_mode="none", method="sf_aia",
+                           method_kwargs=dict(basis_kwargs=dict(degree=2), refine_iters=4, refine_tol=1e-3, crop=2))
         r = PhaseSolver(cfg).fit(stack)
         mp = r.result.method_param
 

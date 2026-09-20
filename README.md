@@ -25,10 +25,10 @@ known.
     its names). `aia.py` — an Advanced Iterative Algorithm
     implementation for blind phase-shift extraction (Wang & Han 2004;
     enhanced per Chen & Kemao, *Optics Express* 27(26), 37634-37651, 2019).
-    `sf_aia.py` — Spatial-Field AIA (SF-AIA), implemented by `aia_step_field`,
-    refining that solve against an
-    arbitrary-degree spatially-varying phase-step error (`degree=1` is a
-    pure linear tilt, registered separately as `"aia_tilt"`).
+    `sf_aia.py` — Spatial-Field AIA, registered as `"sf_aia"` and
+    implemented by `aia_step_field`, refining that solve against a
+    spatially-varying phase-step error expanded on a basis
+    (`basis_kwargs={"degree": 1}`, the default, is a pure linear tilt).
   - `frame_contrast.py` — `measure_frame_contrast`/`measure_frame_visibility`,
     per-frame fringe gain and visibility estimated from the spatial carrier.
   - `carrier.py` — `remove_carrier`, estimating/removing a spatial
