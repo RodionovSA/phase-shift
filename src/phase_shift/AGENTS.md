@@ -23,7 +23,7 @@ Rules for the `phase_shift` package. The root `AGENTS.md` still applies.
 - Mirror the logical structure of the docs where possible: modules, function
   order, and names follow the sections and steps they implement.
 - Keep files short and focused on one topic: one method per module in
-  `methods/`, and separate modules for shared topics (e.g. gauge fixing, error
+  `methods/`, and separate modules for shared topics (e.g. gauge fixing, step fields, error
   computation, polynomial bases).
 - Code used by more than one method, or not specific to any method, goes into a
   shared module, never into one method's file for others to import.

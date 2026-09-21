@@ -22,7 +22,7 @@ from phase_shift.basis import BASES, spatial_basis
 from phase_shift.methods import MethodParam
 from phase_shift.methods.gauge import (center_coeffs, center_offsets, normalize_gain,
                                        pin_phase_origin, whiten_uv)
-from phase_shift.methods.sf_aia import step_field_quality
+from phase_shift.methods.step_field import step_field_quality
 from phase_shift.utils import wrap
 
 

@@ -129,9 +129,10 @@ diagnostics from Chen & Kemao 2019: large values flag a poorly conditioned
 acquisition whose result shouldn't be trusted, even if `converged` is
 `True`), `predicted_rms` (the paper's predicted phase error in radians),
 `iters_run`, `converged`, and (when `gain_mode="joint"`) `g_fit`/`c_fit`/
-`g_min_ratio` describing the joint-gain fit. For `"sf_aia"`, a
-`StepFieldParam` wrapping that `AIAParam` alongside the step field itself:
-`basis`/`basis_kwargs` naming the family it was expanded on, `coeffs`
+`g_min_ratio` describing the joint-gain fit. For `"sf_aia"`, an
+`SFAIAParam` — a `StepFieldParam`, the shared base for any method that
+recovers a step field — wrapping that `AIAParam` alongside the step field
+itself: `basis`/`basis_kwargs` naming the family it was expanded on, `coeffs`
 (shape `(J, N)`, not gauge-fixed — subtract the frame mean before reading a
 row as per-frame drift) and `coeffs_rms`, `kappa_fit` flagging a basis that
 has outrun what the fringe pattern resolves, and `rms_frac`,

@@ -12,8 +12,9 @@ Add a method as its own module here plus one entry below; :data:`METHODS`
 follows from the keys and nothing else changes. The building blocks the
 methods share are re-exported here too: the alternating least-squares steps
 (:mod:`phase_shift.methods.steps`), the gauge conventions
-(:mod:`phase_shift.methods.gauge`), and the accuracy diagnostics
-(:mod:`phase_shift.methods.diagnostics`).
+(:mod:`phase_shift.methods.gauge`), the accuracy diagnostics
+(:mod:`phase_shift.methods.diagnostics`), and the spatially varying phase step
+(:mod:`phase_shift.methods.step_field`).
 """
 
 from .aia import aia
@@ -21,7 +22,8 @@ from .base import MethodParam
 from .diagnostics import AIAParam, aia_diagnostics, chunked_sigma, cond2
 from .gauge import (center_coeffs, center_offsets, normalize_gain, pin_phase_origin,
                     whiten_uv)
-from .sf_aia import StepFieldParam, aia_step_field, fit_step_field, step_field_quality
+from .sf_aia import SFAIAParam, aia_step_field, fit_step_field
+from .step_field import StepFieldParam, step_field_quality
 from .steps import frame_step, pixel_design, pixel_step
 
 METHOD_REGISTRY = {
@@ -39,6 +41,7 @@ __all__ = [
     "aia_step_field",
     "AIAParam",
     "StepFieldParam",
+    "SFAIAParam",
     "pixel_step",
     "frame_step",
     "pixel_design",
