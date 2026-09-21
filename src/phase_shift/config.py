@@ -42,9 +42,11 @@ class PhaseConfig:
         ``docs/aia.md`` Eq. (32). Defaults to the per-pixel RMS fit residual.
     phi_error_simplified : bool, default True
         Compute ``PhaseResult.phi_error`` for known steps and gains,
-        ``docs/aia.md`` Eq. (26). If False, add the correction for fitted
-        steps and gains (§"Stage 2", §"Stage 3"), which needs memory of order
-        ``(N, H, W)``.
+        ``docs/aia.md`` Eq. (26). If False, add the exact correction for the
+        steps and gains the method fitted, ``docs/aia.md`` Eq. (40) or (45),
+        and for ``"sf_aia"`` the step field's own term, ``docs/sf_aia.md``
+        Eq. (E9). The correction is ``O(1/N_p)``, so it matters on a small
+        region and not on a full frame.
 
     Raises
     ------

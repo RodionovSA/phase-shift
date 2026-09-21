@@ -261,6 +261,8 @@ $$\big\langle\sigma_\Phi^2\big\rangle_{x,y}=\frac{1}{2N}\Big\langle\frac{\sigma^
 
 The two factors must stay under one spatial average: replacing it by $\langle\sigma^2\rangle\langle1/b^2\rangle$ overstates the error whenever $\sigma$ and $b$ are positively correlated, which shot noise makes the rule rather than the exception.
 
+Both conditions are sharper than "many fringes". The first replacement is exact as soon as the second harmonic of $\Phi$ averages out, so it holds for $\Phi$ spanning any interval of length $\pi$, not $2\pi$; it is $25\%$ off over an interval of $\pi/2$ and a factor $2$ off for a nearly flat field. The second fails independently of the first, and no spread of $\Phi$ repairs it: where the contrast is locked to the phase rather than varying across it, the average of $\sigma^2/b^2$ is not the product of its factors, and Eq. (29) reads low — by $16\%$, for example, for $b=1+0.6\cos\Phi$.
+
 **Ideal case.** For evenly spaced steps $\delta_n=2\pi n/N$ with $N\ge3$ and unit gain, $R=R^{(2)}=0$, so $C=\tfrac12I_2$ and
 
 $$\sigma_\Phi=\sqrt{\frac2N}\,\frac{\sigma}{b},\tag{30}$$
@@ -308,28 +310,72 @@ $$\sigma_{\delta_n}^2\approx\frac{2\sigma_{\text{eff}}^2}{N_p\langle b^2\rangle\
 
 The $b^2$ weighting says that bright, high-contrast pixels dominate the frame-step fit, so their noise level sets the uncertainty of $\delta_n$.
 
-**Effect on the phase.** The estimate $\hat\delta_n$ is fitted from the same frames the pixel step then uses, so $e_{\delta_n}$ is correlated with the noise at every pixel. Treating the two as independent — adding $\sum_n(\partial I_n/\partial\delta_n)^2\operatorname{Var}(e_{\delta_n})\,k_nk_n^\top$ to $\sigma^2S$ — gives the right size but the wrong sign, because the correlation contributes twice that term with the opposite sign. For evenly spaced steps, unit gain, and $\Phi$ spread evenly over $2\pi$, the net effect is a reduction:
+The condition that fails first is not the stated $\sum u^2\approx\sum v^2$, $\sum uv\approx0$ — whitening, Eq. (15), imposes the first two exactly — but the one left unstated: $\sum_{x,y}u\approx\sum_{x,y}v\approx0$, the quadratures orthogonal to the constant column of $B$, which is what makes $A_{ps}$ diagonal. That holds once the field spans a full fringe and fails fast below it: Eq. (37) is exact at one fringe, $3.3$ times off at half a fringe, and $22$ times off at a quarter, where $\kappa_{ps}$ is already large. Equation (36) is exact throughout and costs one $3\times3$ inverse.
 
-$$\sigma_\Phi^2\big|_{\text{ideal}}=\sigma_\Phi^2\big|_{\text{Eq. (30)}}\Big(1-\frac{3}{2N_p}\Big).\tag{38}$$
+**Effect on the phase.** The estimate $\hat\delta_n$ is fitted from the same frames the pixel step then uses, so $e_{\delta_n}$ is correlated with the noise at every pixel, and the two contributions cannot be added as though independent. Both are linear in the same noise, so writing the frame-step solution out resolves the correlation rather than estimating it. By Eqs. (18)–(19) applied to $B$, that solution is a pixel-weighted sum of the frame's own noise,
 
-Away from that configuration the per-pixel covariance is not settled here: with irregular phase coverage the ratio to Stage 1 falls on either side of $1$, and neither the independent-error expression nor its sign-corrected counterpart reproduces it. What holds in every case is the order of the effect: fitting $\delta_n$ changes the per-pixel phase variance by $O(1/N_p)$, a few parts in $10^3$ for a megapixel field, and the correction vanishes as $N_p$ grows. Frame-step errors are nonetheless spatially coherent — one number per frame, not one per pixel — so they do not average away across the field the way per-pixel noise does, and they matter when a reconstruction is differenced against another acquisition with correlated $\delta_n$ error. The effective $N_p$ is also smaller than the raw pixel count whenever a small region is used or the noise is spatially correlated.
+$$\binom{e_{P_n}}{e_{Q_n}}=\sum_{x,y}\ell(x,y)\,\varepsilon_n(x,y),\qquad
+\ell(x,y)=\Big[A_{ps}^{-1}\big(1,u(x,y),v(x,y)\big)^{\!\top}\Big]_{\{P,Q\}},\tag{38}$$
+
+with $M=\sum_{x,y}\ell\,\ell^\top\sigma^2(x,y)$ the $\{P,Q\}$ block of Eq. (35), its per-pixel noise read as in Eq. (32). Equation (38) is Eq. (34) transposed: $k_n$ weights the $N$ frames at one pixel, $\ell$ weights the $N_p$ pixels within one frame. It contains frame $n$'s noise alone, so $e_{\delta_n}$ and $e_{\delta_m}$ are uncorrelated for $n\ne m$.
+
+Collect the two displacements of $(u,v)$ at one pixel. The pixel step's own noise term is $\sum_nk_n\varepsilon_n(x,y)$, the $\{u,v\}$ part of Eq. (18); the design error contributes Eq. (33) once per frame. Writing $q=(u,v)^\top$ at that pixel, the sensitivity of Eq. (33) is $\partial I_n/\partial\delta_n=g_n\,w_n^\top q$ while $e_{\delta_n}=w_n^\top(e_{P_n},e_{Q_n})^\top/g_n$, so the two factors of $g_n$ cancel and
+
+$$\binom{e_u}{e_v}=\sum_{n=1}^Nk_n\,\eta_n,\qquad
+\eta_n=\varepsilon_n(x,y)-q^\top\Pi_n\binom{e_{P_n}}{e_{Q_n}},\qquad
+\Pi_n=w_nw_n^\top.\tag{39}$$
+
+Here $\eta_n$ is the effective noise frame $n$ contributes at that pixel: its own, less the part the frame step has already spent on $\delta_n$. The projector $\Pi_n$ keeps the component of the frame-step error that moves $\delta_n$ and discards the one that moves $g_n$, which is held fixed at this stage; Stage 3 replaces it by $I_2$. Since the $\eta_n$ are uncorrelated across frames, and $\varepsilon_n(x,y)$ enters $(e_{P_n},e_{Q_n})$ with the weight $\ell(x,y)$ of Eq. (38),
+
+$$\sigma_\Phi^2(x,y)=\frac{1}{b^2}\sum_{n=1}^N\big(w^\top k_n\big)^2\,\Gamma_n,\qquad
+\Gamma_n=\sigma^2\Big[1-2\,q^\top\Pi_n\ell\Big]+q^\top\Pi_nM\Pi_nq,\tag{40}$$
+
+every quantity read at $(x,y)$. The bracket is the correlation between the pixel's own noise and the step fitted from it; the last term is the variance the fitted step injects. Setting $\Pi_n=0$ returns Stage 1 exactly, since $\sum_nk_nk_n^\top=S$. Nothing in Eq. (40) is $N_p$-sized beyond $\ell$ and $q$: the matrices $A_{ps}$, $M$, and $C$ are reductions over the field and over the frames, computed once.
+
+**Ideal case.** For evenly spaced steps, unit gain, and $\Phi$ spread evenly over $2\pi$, Eq. (38) gives $\ell=2q/N_p$ and $M=(2\sigma^2/N_p)I_2$, and Eq. (40) becomes, at every pixel,
+
+$$\sigma_\Phi^2\big|_{\text{ideal}}=\sigma_\Phi^2\big|_{\text{Eq. (30)}}\Big(1-\frac{3}{2N_p}\Big),\tag{41}$$
+
+for $N\ge3$; only at $N=4$ does the coefficient vary across the field, as $-\tfrac32-\tfrac12\cos4\Phi$, whose field average is again $-\tfrac32$. The correlation is what makes this a reduction: the variance term of Eq. (40) contributes $+3/(2N_p)$ and the bracket $-3/N_p$, exactly twice it with the opposite sign. Stage 3 splits the same way, $+2/N_p$ against $-4/N_p$. The factor of two is a property of this configuration, where $M\Pi_nq=\sigma^2\ell$; in general the two terms of $\Gamma_n$ are unrelated and their sum has either sign.
+
+Away from that configuration Eq. (40) is not a fixed multiple of Stage 1 — the ratio varies from pixel to pixel through $q$, and falls on either side of $1$ — but its size is always the same: fitting $\delta_n$ changes the per-pixel phase variance by $O(1/N_p)$, a few parts in $10^3$ for a megapixel field. Frame-step errors are nonetheless spatially coherent — one number per frame, not one per pixel — so they do not average away across the field the way per-pixel noise does, and they matter when a reconstruction is differenced against another acquisition with correlated $\delta_n$ error. The effective $N_p$ is also smaller than the raw pixel count whenever a small region is used or the noise is spatially correlated.
 
 ### Stage 3: fitted steps and gains
 
 Perturbing the assumed $g_n$ instead of $\delta_n$ gives the same leverage vector, only the sensitivity differs:
 
 $$\frac{\partial X}{\partial g_n}=-A_p^{-1}a_n\,\frac{\partial I_n}{\partial g_n},\qquad
-\frac{\partial I_n}{\partial g_n}=b(x,y)\cos\big(\Phi(x,y)+\delta_n\big).\tag{39}$$
+\frac{\partial I_n}{\partial g_n}=b(x,y)\cos\big(\Phi(x,y)+\delta_n\big).\tag{42}$$
 
-Under the same well-spread approximation, $e_{\delta_n}$ and $e_{g_n}$ are uncorrelated to leading order: $\delta_n$ is an angle and $g_n$ a radius, so their errors are orthogonal projections of one isotropic error in $(P_n,Q_n)$. The gain error follows from Eq. (35) in the same way as Eq. (37),
+**Size of the gain error.** The gain is the radius where $\delta_n$ is the angle, so its error is the radial projection of the same frame-step covariance that Eq. (36) projects tangentially. With $d_n$ of Eq. (25) orthogonal to $w_n$, and $M$ the $\{P,Q\}$ block of Eq. (35),
 
-$$\sigma_{g_n}^2\approx\frac{2\sigma_{\text{eff}}^2}{N_p\langle b^2\rangle},\tag{40}$$
+$$\sigma_{g_n}^2=d_n^\top Md_n,\qquad
+\operatorname{Cov}\big(e_{\delta_n},e_{g_n}\big)=\frac1{g_n}w_n^\top Md_n,\qquad
+g_n^2\sigma_{\delta_n}^2+\sigma_{g_n}^2=\operatorname{tr}M,\tag{43}$$
 
-without the $1/g_n^2$, since a radius does not gain precision as it grows the way an angle does at fixed arc-length error. The correlation of Stage 2 applies here as well, and in the ideal configuration the two contributions combine into
+the last being the frame-side counterpart of Eq. (27): the step and the gain of a frame share one error budget, split by how $d_n$ aligns with the principal axes of $M$, and they are uncorrelated exactly when $d_n$ is one of those axes. Under the same well-spread approximation that gives Eq. (37), $M$ is isotropic, the covariance vanishes, and
 
-$$\sigma_\Phi^2\big|_{\text{ideal}}=\sigma_\Phi^2\big|_{\text{Eq. (30)}}\Big(1-\frac{2}{N_p}\Big).\tag{41}$$
+$$\sigma_{g_n}^2\approx\frac{2\sigma_{\text{eff}}^2}{N_p\langle b^2\rangle},\tag{44}$$
+
+without the $1/g_n^2$ of Eq. (37), since a radius does not gain precision as it grows the way an angle does at fixed arc-length error.
+
+**Effect on the phase.** Both errors now perturb the design, and together they are the whole of what the frame step solves for, so Eq. (39) holds with $\Pi_n=I_2$ in place of $w_nw_n^\top$ — the cross term $\operatorname{Cov}(e_{\delta_n},e_{g_n})$ of Eq. (43) included automatically. Then $\Gamma_n$ in Eq. (40) no longer depends on $n$, and $\sum_nk_nk_n^\top=S$ collapses the sum: Stage 3 scales Stage 1 by one factor per pixel,
+
+$$\sigma_\Phi^2(x,y)=\sigma_\Phi^2\big|_{\text{Eq. (26)}}\left[1-2\,q^\top\ell+\frac{q^\top Mq}{\sigma^2}\right].\tag{45}$$
+
+**Ideal case.** With $\ell=2q/N_p$, $M=(2\sigma^2/N_p)I_2$ and $q^\top q=b^2$, the bracket of Eq. (45) is $1-4/N_p+2/N_p$, so at every pixel and for every $N\ge3$,
+
+$$\sigma_\Phi^2\big|_{\text{ideal}}=\sigma_\Phi^2\big|_{\text{Eq. (30)}}\Big(1-\frac{2}{N_p}\Big).\tag{46}$$
 
 ### Validity
+
+**Stages 2 and 3.** Equations (40) and (45) are first order in the noise, and they inherit the assumption of Eq. (35): the frame step is read with $(u,v)$ at their noise-free values. They therefore describe one pass of the alternation taken from the true fields, not the fixed point the converged iteration settles on, in which each step is fitted against the other's already perturbed estimate. They are variances about each estimator's own mean. Three effects sit outside them.
+
+The first is a bias rather than a variance. The frame step of the converged alternation regresses on the quadratures the pixel step estimated from the same frames, and a regression on an estimated regressor is biased. By Eq. (20) that regressor error is $\sigma^2S$ at every pixel alike, however many pixels there are, so the bias is $O(\sigma^2/b^2)$ and, unlike every other term in this section, does not shrink as the field grows. Since $\sigma_{\delta_n}$ falls as $N_p^{-1/2}$ by Eq. (37) while the bias does not, the two cross at $N_p$ of order $b^2/\sigma^2$, and beyond that the step error is dominated by a term Eq. (36) does not contain. That crossing is confined to $\delta_n$: $\sigma_\Phi$ is a per-pixel quantity with no $N_p$ in it, so the bias stays a fixed small fraction of the phase noise at every field size instead of overtaking it, and Eq. (26) remains the operative predictor of $\sigma_\Phi$ however large the frame. The bias is absent from a noise-free solve and from a frame step given the exact $(u,v)$, so it belongs to the alternation and not to the model. It is not derived here.
+
+The second is the frame-independent displacement $(a_u,a_v)$ of §"Dropping the background field", which biases $\hat\delta_n$ whenever the background overlaps the fringe pattern. Being common to all frames it is a gauge shift when $g_n$ is fitted, but not when $g_n$ is held fixed, so it enters Stage 2 and an error budget quoted as an RMS deviation from the true step is then larger than Eq. (36) alone suggests. Unlike the first, it is deterministic: it survives at zero noise.
+
+The third is the phase-origin convention $\delta_n\leftarrow\delta_n-\delta_1$, which adds $-e_{\delta_1}$ to every step, displacing $\Phi$ by one constant across the whole field; Eqs. (40) and (45) are the variance of $\Phi$ up to that constant, which is the quantity a relative phase map uses.
 
 Equation (21) linearizes $\operatorname{atan2}$ and the square root about the noise-free solution, which holds while $b/\sigma\gg1$, roughly $\sigma_\Phi\lesssim0.3$ rad. Below that the exact phasor distribution takes over, and Eq. (26) understates the probability of a $2\pi$ phase slip. The independence in Eq. (17) is not broken by shot noise, which is independent per pixel and frame, but by effects the model excludes: banded or common-mode readout, crosstalk, and speckle or source fluctuation correlated across the field. Dividing out $\alpha_n$ rescales frame $n$'s variance by $1/\alpha_n^2$, which is diagonal but not proportional to $I_N$, so Eq. (20) does not apply exactly; since $\alpha_n$ is estimated rather than assumed, this is corrected by replacing $A_p$ with $A^\top WA$, $W=\operatorname{diag}(\alpha_n^2)$, throughout.
 

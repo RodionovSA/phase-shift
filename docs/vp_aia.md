@@ -42,12 +42,12 @@ $$\delta_n\leftarrow\delta_n-d,\qquad\Phi(x,y)\leftarrow\Phi(x,y)+d.
 
 This preserves both zero-mean conditions on $\Delta_n$.
 
-**Contrast scale.** A common positive factor can be exchanged between the frame contrasts and the fringe amplitude. Take $s=\langle g_n\rangle_n$ and apply
+**Contrast scale.** A common positive factor can be exchanged between the frame contrasts and the fringe amplitude. Take $s=\operatorname{median}_ng_n$ and apply
 
 $$g_n\leftarrow g_n/s,\qquad b(x,y)\leftarrow s\,b(x,y).
-\qquad\text{Thus }\langle g_n\rangle_n=1.$$
+\qquad\text{Thus }\operatorname{median}_ng_n=1.$$
 
-This leaves all phase conventions unchanged.
+This leaves all phase conventions unchanged. The median is used rather than the mean, following `aia.md` Eq. (16), so that a single frame whose contrast collapses — the failure the diagnostic $\min_ng_n/\operatorname{median}_ng_n$ flags — does not move the scale of every other frame.
 
 These conventions define which parts are called static phase, piston, phase-step error, contrast, and amplitude. The AIA parametrization introduces four further freedoms, fixed by the quadrature-frame conventions of the zeroth-order solution.
 
@@ -144,7 +144,7 @@ and under the shifts $(P_n,Q_n)\leftarrow(P_n+p,\,Q_n+q)$, $a\leftarrow a-pu-qv$
 
 $$\sum_j(a_j-\bar a)u_j=\sum_j(a_j-\bar a)v_j=0,\qquad\sum_ju_j^2=\sum_jv_j^2,\qquad\sum_ju_jv_j=0,$$
 
-with $\bar a=\langle a\rangle_{x,y}$. The remaining rotations, reflections, and common scalings of $T$ are fixed by $\delta_1=0$, the step direction, and $\langle g_n\rangle_n=1$. Unlike rotations and common scalings, shifts, shears, and anisotropic scalings change the first-order sensitivity $w_n^{(1)}=P_nv-Q_nu$ of Eq. (4). These four conditions are therefore assumptions on the physical fields, typically met by a pattern with many fringes and a background uncorrelated with the quadratures. Small transformations still leave the intensities unchanged to first order, so the conditions also fix the first-order problem.
+with $\bar a=\langle a\rangle_{x,y}$. The remaining rotations, reflections, and common scalings of $T$ are fixed by $\delta_1=0$, the step direction, and $\operatorname{median}_ng_n=1$. Unlike rotations and common scalings, shifts, shears, and anisotropic scalings change the first-order sensitivity $w_n^{(1)}=P_nv-Q_nu$ of Eq. (4). These four conditions are therefore assumptions on the physical fields, typically met by a pattern with many fringes and a background uncorrelated with the quadratures. Small transformations still leave the intensities unchanged to first order, so the conditions also fix the first-order problem.
 
 ## First-order corrections to the AIA solution
 
@@ -362,7 +362,7 @@ $$a=a^{(0)}+a^{(1)},\qquad u=u^{(0)}+u^{(1)},\qquad v=v^{(0)}+v^{(1)},\qquad P_n
 
    This is the phase-origin convention, $\delta_n\leftarrow\delta_n-\delta_1$ and $\Phi\leftarrow\Phi+\delta_1$, written in quadrature variables. Thus $\delta_1=0$.
 
-4. **Contrast scale.** With $s=\big\langle\sqrt{P_n^2+Q_n^2}\big\rangle_n$, apply $P_n\leftarrow P_n/s$, $Q_n\leftarrow Q_n/s$, $u\leftarrow su$, $v\leftarrow sv$. Thus $\langle g_n\rangle_n=1$.
+4. **Contrast scale.** With $s=\operatorname{median}_n\sqrt{P_n^2+Q_n^2}$, apply $P_n\leftarrow P_n/s$, $Q_n\leftarrow Q_n/s$, $u\leftarrow su$, $v\leftarrow sv$. Thus $\operatorname{median}_ng_n=1$.
 
 The final estimates are $\delta_n=\operatorname{atan2}(Q_n,P_n)$, $g_n=\sqrt{P_n^2+Q_n^2}$, $b=\sqrt{u^2+v^2}$, $\Phi=\operatorname{atan2}(-v,u)$, and the phase-step error $\Delta_n^{(1)}$ of Eq. (26). Their remaining errors are of second order in $\Delta_n$.
 
@@ -406,7 +406,11 @@ where $\gamma$ is the column of length $2N+NJ$, ordered as $\beta$, with zeros a
 $$\frac{\sigma_\Phi^2}{\sigma_0^2\sum_ns_n^2}\approx1+\frac{\sum_jH_j(x,y)^2}{K},\qquad
 \bigg\langle\frac{\sigma_\Phi^2}{\sigma_0^2\sum_ns_n^2}\bigg\rangle_{x,y}\approx1+\frac{J}{K}.\tag{30}$$
 
-The correction increases the phase noise by a relative amount of order $J/K$, largest where $\sum_jH_j^2$ is large and negligible for $K\gg J$.
+The correction increases the phase noise by a relative amount of order $J/K$, largest where $\sum_jH_j^2$ is large and negligible for $K\gg J$. Equation (30) is a reading of Eq. (29) under the four conditions above, not a substitute for it: away from them — irregular steps, per-frame gains, a contrast that varies across the field, or modes the fringe pattern resolves unevenly — Eq. (29) is the form to use.
+
+**Noise of the zeroth-order steps.** The first term of Eq. (29) is `aia.md` Eq. (26), the phase variance at known $\delta_n$ and $g_n$. The zeroth-order solve estimates both from the same frames, which adds the $O(1/K)$ term of `aia.md` Eqs. (40) and (45); the zeros of $\gamma$ at the positions of $P_n^{(1)},Q_n^{(1)}$ say only that the first-order frame corrections leave $\Phi$ unchanged to first order, not that the steps carry no noise. The two terms add, as in `sf_aia.md` Eq. (E9), and their cross-correlation is not derived here.
+
+**Comparison with SF-AIA.** For the same $J$-mode field fitted from the same data, `sf_aia.md` Eq. (E8) gives $1+J/(4N_p)$ where Eq. (30) gives $1+J/K$, with $K=N_p$. The factor of four is the estimator, not a disagreement between the two derivations. Both reduce to a quadratic form in the $N\times N$ matrix with entries $\Pi_{nm}\cos(\delta_n-\delta_m)$, whose eigenvalue on the second temporal harmonic — where the frame-varying part of $s_nw_n$ lies — is $\tfrac12$. SF-AIA's per-frame fit multiplies that harmonic by the eigenvalue; VP-AIA's joint fit inverts it. The two therefore differ by $2/\tfrac12=4$ in variance, and it is the same factor as in `sf_aia.md` §"Bias of a single pass": one SF-AIA pass recovers the first and second harmonics of $c_{jn}$ at half their size, and attenuates their noise by that same half. Paying $J/K$ rather than $J/(4N_p)$ is therefore the price of the unbiased field, not an extra cost of the method: SF-AIA buys its smaller variance with the attenuation that is exactly its bias. Its refinement loop gives that attenuation back round by round, and its noise passes Eq. (30) rather than settling at it, since the alternation's fixed point is not the joint least-squares solution fitted here. VP-AIA reaches the unbiased field and Eq. (30) together, in one pass.
 
 ## References
 

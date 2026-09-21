@@ -211,7 +211,7 @@ Eq. (E1) uses only the first-order model. Each round corrects the data and re-so
 
 ## Noise of the corrected solve
 
-Consider noise $\varepsilon_n(x,y)$ with variance $\sigma_0^2$, independent across frames and pixels, and exact $P_n,Q_n$. At one pixel, the pixel-step estimate of $\Phi$ is linear in the intensity column. By Eqs. (T10) and (T15), its error is $\sum_ns_n\varepsilon_n$ with
+Consider noise $\varepsilon_n(x,y)$ with variance $\sigma_0^2(x,y)$, independent across frames and pixels but not of equal size across the field (`aia.md`, Eqs. 17 and 32), and exact $P_n,Q_n$. At one pixel, the pixel-step estimate of $\Phi$ is linear in the intensity column. By Eqs. (T10) and (T15), its error is $\sum_ns_n\varepsilon_n$ with
 
 $$\begin{pmatrix}s_1\\\vdots\\s_N\end{pmatrix}=AA_p^{-1}\begin{pmatrix}0\\-\sin\Phi/b\\-\cos\Phi/b\end{pmatrix},$$
 
@@ -219,16 +219,35 @@ so plain AIA gives $\sigma_\Phi^2=\sigma_0^2\sum_ns_n^2$.
 
 **Noise in the fitted field.** Let $\Pi=I-AA_p^{-1}A^\top$ be the $N\times N$ matrix that removes from a column over frames its pixel-step fit (`vp_aia.md`, Eq. 18). The residual noise at each pixel is $\Pi(\varepsilon_1,\dots,\varepsilon_N)^\top$, and Eq. (E1) maps the residual noise of frame $n$ to coefficient errors through $-\big(G^{(n)}\big)^{-1}D_n^\top$. The correction adds $w_np^\top(c_{1n},\dots,c_{Jn})^\top$ to frame $n$, where $p=(p_1,\dots,p_J)^\top$ at the pixel. Since $(s_1,\dots,s_N)^\top$ lies in the column space of $A$, $\Pi$ removes it, and the added term is uncorrelated with the phase error $\sum_ns_n\varepsilon_n$ of the same pixel. The correction therefore cannot reduce the noise; it adds a variance term:
 
-$$\sigma_\Phi^2=\sigma_0^2\sum_ns_n^2+\sigma_0^2\sum_{n,m}t_nt_m\,\Pi_{nm}\,p^\top\big(G^{(n)}\big)^{-1}D_n^\top D_m\big(G^{(m)}\big)^{-1}p,\tag{E7}$$
+$$\sigma_\Phi^2=\sigma_0^2\sum_ns_n^2+\sum_{n,m}t_nt_m\,\Pi_{nm}\,p^\top\big(G^{(n)}\big)^{-1}D_n^\top\Lambda D_m\big(G^{(m)}\big)^{-1}p,\qquad\Lambda=\operatorname{diag}\big(\sigma_0^2(x,y)\big),\tag{E7}$$
 
-with $t_n=s_nw_n$ for the fit of Eq. (E1), and $t_n=s_nw_n-\tfrac1N\sum_{n'}s_{n'}w_{n'}$ after the gauge fixing of Eq. (E4). Here $D_n^\top D_m$ is the $J\times J$ matrix with entries $\sum_{x,y}w_nw_mp_jp_{j'}$.
+with $t_n=s_nw_n$ for the fit of Eq. (E1), and $t_n=s_nw_n-\tfrac1N\sum_{n'}s_{n'}w_{n'}$ after the gauge fixing of Eq. (E4). Here $D_n^\top\Lambda D_m$ is the $J\times J$ matrix with entries $\sum_{x,y}\sigma_0^2w_nw_mp_jp_{j'}$: the noise enters the coefficient covariance weighted by where in the field it sits, while $G^{(n)}=D_n^\top D_n$ stays unweighted, Eq. (E1) being an unweighted fit. The two coincide up to a factor when $\sigma_0$ is constant, $D_n^\top\Lambda D_m=\sigma_0^2D_n^\top D_m$, and the noise then factors out of the second term as it does out of the first. Where it is not constant the distinction matters: a field whose noise is concentrated where $w_n$ is large is fitted worse than its unweighted Gram suggests.
 
-**Uniform steps.** Assume uniform steps with $N\ge5$, constant $g_n$ and $b$, many fringes, and an orthonormal basis, $\langle p_jp_{j'}\rangle_{x,y}=\delta_{jj'}$. Then $G^{(n)}\approx\tfrac12g^2b^2N_pI_J$, $D_n^\top D_m\approx\tfrac12g^2b^2N_p\cos(\delta_n-\delta_m)\,I_J$, and $s_n=-2w_n/(Ng^2b^2)$, where $I_J$ is the $J\times J$ identity matrix. Averaging Eq. (E7) over the fringe phase gives
+**Uniform steps.** Assume uniform steps with $N\ge5$, constant $\sigma_0$, $g_n$ and $b$, many fringes, and an orthonormal basis, $\langle p_jp_{j'}\rangle_{x,y}=\delta_{jj'}$. Then $G^{(n)}\approx\tfrac12g^2b^2N_pI_J$, $D_n^\top D_m\approx\tfrac12g^2b^2N_p\cos(\delta_n-\delta_m)\,I_J$, and $s_n=-2w_n/(Ng^2b^2)$, where $I_J$ is the $J\times J$ identity matrix. Averaging Eq. (E7) over the fringe phase gives
 
 $$\frac{\sigma_\Phi^2}{\sigma_0^2\sum_ns_n^2}\approx1+\frac{|p(x,y)|^2}{4N_p},\qquad
 \bigg\langle\frac{\sigma_\Phi^2}{\sigma_0^2\sum_ns_n^2}\bigg\rangle_{x,y}\approx1+\frac{J}{4N_p}.\tag{E8}$$
 
-The correction increases the phase noise by a relative amount of order $J/N_p$, largest where $|p|$ is large and negligible for $N_p\gg J$. Eq. (E7) treats $P_n$ and $Q_n$ as exact; the noise of their estimates is treated in `aia.md` and is not re-derived here.
+The correction increases the phase noise by a relative amount of order $J/N_p$, largest where $|p|$ is large and negligible for $N_p\gg J$. It can only increase it: the field is fitted to $\Pi\varepsilon$, the part of the noise the pixel step has already removed, so nothing it adds cancels the phase error of the same pixel.
+
+Equation (E8) is a reading of Eq. (E7) under the four conditions above, not a substitute for it. Away from them — irregular steps, per-frame gains, a contrast or a noise level that varies across the field, or a basis the fringe pattern resolves unevenly — Eq. (E7) is the form to use. It costs one $J\times J$ solve per frame and one $NJ\times NJ$ quadratic form per pixel, with the Gram matrices $D_n^\top D_m$ a single reduction over the field.
+
+### Composition with the fitted-step error
+
+Equation (E7) holds $P_n$ and $Q_n$ at their true values. Their own noise is the subject of `aia.md` §"Phase-error covariance", whose Eqs. (40) and (45) give the exact per-pixel phase variance when $\delta_n$, or $\delta_n$ and $g_n$, is fitted from the same frames. Both are first-order in the same noise and are built on the same $(u,v)$, and they describe displacements of $\Phi$ from different sources — a perturbed pixel-step design, and a fitted step field — so the SF-AIA phase variance is
+
+$$\sigma_\Phi^2=\sigma_\Phi^2\Big|_{\texttt{aia.md}\ \text{Eq. (40) or (45)}}
++\sum_{n,m}t_nt_m\,\Pi_{nm}\,p^\top\big(G^{(n)}\big)^{-1}D_n^\top\Lambda D_m\big(G^{(m)}\big)^{-1}p.\tag{E9}$$
+
+The first term reduces to `aia.md` Eq. (26) when the steps are known, so Eq. (E9) contains the plain-AIA result as its own special case at $J=0$.
+
+### Validity
+
+Equation (E9) is a sum of two exact terms with a third omitted. Their cross-correlation is not derived here: the step-field fit is driven by $\Pi\varepsilon$, which the pixel step removes, while $e_{\delta_n}$ comes from the frame step's regression on $(1,u,v)$ across pixels, and those two projections are not orthogonal in general. The omitted term is $O(1/N_p)$, the same order as either of the two kept.
+
+Both terms are first order in the noise and describe one corrected pass taken from the true fields, so they carry the conditions of `aia.md` §"Validity" unchanged: they are variances about each estimator's own mean, in the gauge where $\Phi$ is free up to one additive constant.
+
+Equation (E9) is also a single pass, and the refinement loop of §"Algorithm" does not leave it where it is. Each round removes part of the bias of §"Bias of a single pass", and with it part of the attenuation that kept the one-pass noise small, so the added variance grows round by round. It passes the $J/N_p$ of `vp_aia.md` Eq. (30) — the level of the unbiased one-pass estimator — after about three rounds and keeps rising, because the alternation's fixed point is not the joint least-squares solution that Eq. (30) describes. Equation (E9) is therefore a floor for a solve that has run several rounds, not an estimate of it, and the loop's own fixed point is not derived here. This is why the algorithm reports the best-scoring round rather than the last.
 
 ## References
 

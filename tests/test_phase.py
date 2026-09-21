@@ -18,7 +18,10 @@ from phase_shift import (
     subtract_reference,
 )
 from phase_shift.backend import CUPY_AVAILABLE
-from phase_shift.basis import spatial_basis
+from phase_shift.basis import BASES, spatial_basis
+from phase_shift.methods import MethodParam
+from phase_shift.methods.gauge import (center_coeffs, center_offsets, normalize_gain,
+                                       pin_phase_origin, whiten_uv)
 from phase_shift.methods.sf_aia import step_field_quality
 from phase_shift.utils import wrap
 
@@ -472,3 +475,204 @@ class TestWrap:
         x = rng.uniform(-50, 50, 10_000)
         ref = np.angle(np.exp(1j * x))
         assert np.max(np.abs(wrap(x) - ref)) < 1e-12
+
+
+class TestGaugeConventions:
+    """Each convention of `docs/gauge_conventions.md`, on its own helper."""
+
+    def test_whiten_uv_equalizes_energy_and_decorrelates(self):
+        rng = np.random.default_rng(11)
+        P = 2000
+        u = rng.standard_normal(P) * 3.0
+        v = 0.4 * u + rng.standard_normal(P) * 0.5      # sheared and anisotropic
+        u_w, v_w = whiten_uv(u, v, np)
+        Suu, Svv, Suv = np.sum(u_w ** 2), np.sum(v_w ** 2), np.sum(u_w * v_w)
+        assert abs(Suu - Svv) < 1e-8 * Suu              # Eq. (15), equal energy
+        assert abs(Suv) < 1e-8 * Suu                    # Eq. (15), decorrelated
+
+    def test_whiten_uv_preserves_total_energy_and_spanned_subspace(self):
+        rng = np.random.default_rng(12)
+        u = rng.standard_normal(500) * 2.0
+        v = 0.3 * u + rng.standard_normal(500)
+        u_w, v_w = whiten_uv(u, v, np)
+        total = np.sum(u ** 2) + np.sum(v ** 2)
+        assert abs(np.sum(u_w ** 2) + np.sum(v_w ** 2) - total) < 1e-8 * total
+        # A re-basing of span{u, v}: projecting u onto {u_w, v_w} loses nothing.
+        M = np.stack([u_w, v_w], axis=1)
+        resid = u - M @ np.linalg.lstsq(M, u, rcond=None)[0]
+        assert np.max(np.abs(resid)) < 1e-8 * np.max(np.abs(u))
+
+    def test_pin_phase_origin_zeroes_first_step(self):
+        delta = np.array([0.7, 1.9, 3.4, 5.1])
+        pinned = pin_phase_origin(delta)
+        assert pinned[0] == 0.0
+        assert np.allclose(np.diff(pinned), np.diff(delta))   # differences untouched
+
+    def test_normalize_gain_sets_median_to_one(self):
+        g = np.array([0.4, 1.3, 2.2, 5.0, 0.9])
+        g_n = normalize_gain(g, np)
+        assert abs(float(np.median(g_n)) - 1.0) < 1e-12       # Eq. (16)
+        assert np.allclose(g_n / g_n[0], g / g[0])            # ratios untouched
+
+    def test_center_offsets_sets_mean_to_zero(self):
+        c = np.array([1.5, -0.2, 3.3, 0.8])
+        c_c = center_offsets(c, np)
+        assert abs(float(np.mean(c_c))) < 1e-12               # Eq. (16)
+        assert np.allclose(np.diff(c_c), np.diff(c))
+
+    def test_center_coeffs_sets_frame_mean_to_zero_per_term(self):
+        rng = np.random.default_rng(13)
+        coeffs = rng.standard_normal((3, 7)) + np.array([[2.0], [-1.0], [0.5]])
+        centered = center_coeffs(coeffs)
+        assert np.allclose(centered.mean(axis=1), 0, atol=1e-12)   # Eq. (T3b)
+        assert np.allclose(centered - centered[:, :1], coeffs - coeffs[:, :1])
+
+
+class TestSpatialBasis:
+    @pytest.mark.parametrize("kind", BASES)
+    def test_every_family_is_orthonormal_and_zero_mean(self, kind):
+        basis = spatial_basis(23, 29, kind, np)
+        assert basis.ndim == 2 and basis.shape[1] == 23 * 29
+        J = basis.shape[0]
+        assert np.allclose(basis @ basis.T, np.eye(J), atol=1e-8)
+        assert np.allclose(basis.mean(axis=1), 0, atol=1e-10)
+
+    def test_unknown_family_raises(self):
+        with pytest.raises(ValueError, match="unknown basis"):
+            spatial_basis(16, 16, "not_a_family", np)
+
+    def test_truncation_of_a_basis_is_a_basis(self):
+        full = spatial_basis(20, 24, "poly", np, degree=3)
+        short = spatial_basis(20, 24, "poly", np, degree=1)
+        assert np.allclose(full[: short.shape[0]], short, atol=1e-10)
+
+    @pytest.mark.parametrize("H,W,degree", [(1, 16, 1), (16, 1, 2), (2, 3, 2), (3, 2, 2)])
+    def test_field_too_small_for_family_raises(self, H, W, degree):
+        with pytest.raises(ValueError, match="cannot be normalized"):
+            spatial_basis(H, W, "poly", np, degree=degree)
+
+
+class TestMethodParamDefaults:
+    def test_base_phi_error_is_none(self):
+        param = MethodParam()
+        assert param.phi_error(np.ones((4, 4)), np.zeros((4, 4)), np.zeros(5),
+                               np.ones(5), False, np.ones((4, 4)), False, np) is None
+
+    def test_base_phase_step_field_broadcasts_the_piston(self):
+        delta = np.array([0.0, 1.0, 2.0])
+        field = MethodParam().phase_step_field(delta, 4, 5, np)
+        assert field.shape == (3, 4, 5)
+        assert np.allclose(field, delta[:, None, None])
+
+
+class TestPhaseError:
+    def test_ideal_configuration_matches_closed_form(self):
+        """Eq. (26) reduces to Eq. (30) for evenly spaced steps and unit gain."""
+        from phase_shift.errors import aia_phi_error_parts
+
+        N, H, W = 7, 12, 10
+        delta = 2 * np.pi * np.arange(N) / N
+        g = np.ones(N)
+        rng = np.random.default_rng(3)
+        phi = rng.uniform(-np.pi, np.pi, (H, W))
+        b = 1.0 + 0.5 * rng.random((H, W))
+        sigma0 = np.full((H, W), 0.02)
+
+        phi_var, _ = aia_phi_error_parts(b, phi, delta, g, False, sigma0, True, np)
+        expected = (2.0 / N) * (sigma0 / b) ** 2                  # Eq. (30)
+        assert np.allclose(phi_var, expected, rtol=1e-10)
+
+    @pytest.mark.parametrize("fit_gain,coeff", [(False, -1.5), (True, -2.0)])
+    def test_ideal_fitted_step_correction_matches_documented_coefficient(self, fit_gain, coeff):
+        """Eqs. (41)/(46): the ideal-case reading of the exact Eqs. (40)/(45)."""
+        from phase_shift.errors import aia_phi_error_parts
+
+        N, H, W = 7, 16, 16
+        Np = H * W
+        delta = 2 * np.pi * np.arange(N) / N
+        g = np.ones(N)
+        phi = (2 * np.pi * np.arange(Np) / Np).reshape(H, W)   # spread evenly over 2*pi
+        b = np.ones((H, W))
+        sigma0 = np.full((H, W), 0.05)
+
+        base, _ = aia_phi_error_parts(b, phi, delta, g, fit_gain, sigma0, True, np)
+        full, _ = aia_phi_error_parts(b, phi, delta, g, fit_gain, sigma0, False, np)
+        measured = (full / base - 1.0) * Np
+        assert np.allclose(measured, coeff, atol=1e-9)
+
+    def test_correction_scales_as_one_over_pixel_count(self):
+        """The fitted-step term of Eqs. (40)/(45) is O(1/N_p)."""
+        from phase_shift.errors import aia_phi_error_parts
+
+        N = 7
+        delta = np.sort(np.random.default_rng(4).uniform(0, 2 * np.pi, N))
+        delta -= delta[0]
+        g = np.ones(N)
+        sizes = []
+        for side in (16, 32):
+            Y, X = np.mgrid[0:side, 0:side].astype(float)
+            phi = np.angle(np.exp(1j * (0.7 * X + 0.4 * Y)))
+            b = np.ones((side, side))
+            sigma0 = np.full((side, side), 0.05)
+            base, _ = aia_phi_error_parts(b, phi, delta, g, False, sigma0, True, np)
+            full, _ = aia_phi_error_parts(b, phi, delta, g, False, sigma0, False, np)
+            sizes.append(float(np.mean(full / base - 1.0)) * side ** 2)
+        assert abs(sizes[0] - sizes[1]) < 0.35 * abs(sizes[0])   # N_p * correction is stable
+
+    def test_step_field_term_adds_noise_and_grows_with_basis_size(self):
+        """`docs/sf_aia.md` Eq. (E7): the fitted field can only add variance."""
+        from phase_shift.errors import aia_phi_error_parts, step_field_phi_error
+
+        N, H, W = 9, 20, 24
+        rng = np.random.default_rng(6)
+        delta = np.sort(rng.uniform(0, 2 * np.pi, N))
+        delta -= delta[0]
+        g = np.ones(N)
+        Y, X = np.mgrid[0:H, 0:W].astype(float)
+        phi = np.angle(np.exp(1j * (0.9 * X + 0.5 * Y)))
+        b = 0.6 + 0.8 * rng.random((H, W))
+        sigma0 = np.full((H, W), 0.05)
+
+        aia_var, _ = aia_phi_error_parts(b, phi, delta, g, False, sigma0, False, np)
+        extras = []
+        for degree in (1, 2):
+            basis = spatial_basis(H, W, "poly", np, degree=degree)
+            total = step_field_phi_error(b, phi, delta, g, False, sigma0, False,
+                                         basis, np) ** 2
+            extras.append(float(np.mean(total - aia_var)))
+        assert extras[0] > 0                       # adds variance, never subtracts
+        assert extras[1] > extras[0]               # and more of it with more modes
+
+    def test_step_field_term_weights_noise_by_where_it_sits(self):
+        """Eq. (E7)'s `E_nm` carries `sigma_0^2` under the sum over pixels."""
+        from phase_shift.errors import aia_phi_error_parts, step_field_phi_error
+
+        N, H, W = 9, 20, 24
+        delta = 2 * np.pi * np.arange(N) / N
+        g = np.ones(N)
+        Y, X = np.mgrid[0:H, 0:W].astype(float)
+        phi = np.angle(np.exp(1j * (0.9 * X + 0.5 * Y)))
+        b = np.ones((H, W))
+        basis = spatial_basis(H, W, "poly", np, degree=1)
+
+        def extra(sigma0):
+            aia_var, _ = aia_phi_error_parts(b, phi, delta, g, False, sigma0, False, np)
+            total = step_field_phi_error(b, phi, delta, g, False, sigma0, False,
+                                         basis, np) ** 2
+            return total - aia_var
+
+        flat = np.full((H, W), 0.05)
+        # Same mean square, concentrated on a disc at the centre of the field.
+        disc = np.where((X - W / 2) ** 2 + (Y - H / 2) ** 2 < (W / 4) ** 2, 3.0, 1.0)
+        piled = 0.05 * disc / np.sqrt(np.mean(disc ** 2))
+        assert np.isclose(np.mean(piled ** 2), np.mean(flat ** 2))
+        assert np.isclose(np.mean(extra(2 * flat)), 4 * np.mean(extra(flat)))
+        # A single sigma_0 pulled out of Eq. (E7) would make these equal.
+        assert np.mean(extra(piled)) < 0.75 * np.mean(extra(flat))
+
+    def test_solver_reports_a_phi_error_map(self):
+        stack, truth = make_stack()
+        solver = PhaseSolver(PhaseConfig(use_alpha=False, gain_mode="joint")).fit(stack)
+        err = solver.result.phi_error
+        assert err is not None and err.shape == truth["phi"].shape
+        assert np.all(np.isfinite(err)) and np.all(err > 0)

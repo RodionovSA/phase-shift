@@ -1,0 +1,78 @@
+{
+  "coefficient": "variance_fitted / variance_baseline = 1 + k / N_p",
+  "confidence": "95% normal, paired delete-group jackknife; independent noise pairs",
+  "results": [
+    {
+      "pixels": 1024,
+      "frames": 8,
+      "sigma": 0.001,
+      "seed": 20261944,
+      "background_overlap": 0.0,
+      "independent_pairs": 1024,
+      "blocks": 32,
+      "estimator": "aia",
+      "nonconverged": {
+        "stage2": 0,
+        "stage3": 0
+      },
+      "max_iterations": {
+        "stage2": 25,
+        "stage3": 3
+      },
+      "phase": {
+        "truth_origin": {
+          "stage2": {
+            "k": 9.570547495013216,
+            "k_ci95_half_width": 0.7023434804010285,
+            "baseline_variance": 2.505013691917427e-07,
+            "fitted_variance": 2.528426145544531e-07,
+            "bias_rms": 7.610927926518075e-09,
+            "bias_mean_rms_se": 7.938839705173061e-09,
+            "baseline_bias_rms": 7.583758531309118e-09
+          },
+          "stage3": {
+            "k": 5.605169052716292,
+            "k_ci95_half_width": 0.6383921793690855,
+            "baseline_variance": 2.505013691917427e-07,
+            "fitted_variance": 2.5187256306113394e-07,
+            "bias_rms": 7.598809461524605e-09,
+            "bias_mean_rms_se": 7.922158902520442e-09,
+            "baseline_bias_rms": 7.583758531309118e-09
+          }
+        },
+        "spatial_mean_removed": {
+          "stage2": {
+            "k": 0.9576654429768041,
+            "k_ci95_half_width": 0.14863011543965102,
+            "baseline_variance": 2.5025932529066736e-07,
+            "fitted_variance": 2.5049337285669623e-07,
+            "bias_rms": 7.602431401899072e-09,
+            "bias_mean_rms_se": 7.866363972272942e-09,
+            "baseline_bias_rms": 7.582635711857161e-09
+          },
+          "stage3": {
+            "k": -0.9694540600921755,
+            "k_ci95_half_width": 0.11525148338091773,
+            "baseline_variance": 2.5025932529066736e-07,
+            "fitted_variance": 2.5002239665885195e-07,
+            "bias_rms": 7.59878979716309e-09,
+            "bias_mean_rms_se": 7.869406814614931e-09,
+            "baseline_bias_rms": 7.582635711857161e-09
+          }
+        }
+      },
+      "steps": {
+        "stage2": {
+          "variance": 4.291348007790993e-09,
+          "bias_rms": 1.0756739789651276e-09,
+          "bias_mean_rms_se": 1.5050312046892338e-09
+        },
+        "stage3": {
+          "variance": 3.3151377326463946e-09,
+          "bias_rms": 6.933017957955779e-10,
+          "bias_mean_rms_se": 1.2655272610317367e-09
+        }
+      }
+    }
+  ]
+}

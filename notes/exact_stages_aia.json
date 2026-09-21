@@ -1,0 +1,58 @@
+{
+  "aia": [
+    {
+      "N": 5,
+      "Np": 256,
+      "stage": 2,
+      "baseline_ratio": 1.0025428813537338,
+      "predicted_delta": -7.485786612450757e-06,
+      "measured_delta": -7.623844513075037e-06,
+      "ratio": 1.0184426711275278
+    },
+    {
+      "N": 5,
+      "Np": 256,
+      "stage": 3,
+      "baseline_ratio": 1.0025428813537338,
+      "predicted_delta": -1.1027472559937024e-05,
+      "measured_delta": -1.1155668742048287e-05,
+      "ratio": 1.0116251644621634
+    },
+    {
+      "N": 7,
+      "Np": 256,
+      "stage": 2,
+      "baseline_ratio": 1.0022685786253238,
+      "predicted_delta": -5.02279505170977e-06,
+      "measured_delta": -5.09908574434972e-06,
+      "ratio": 1.015188892211316
+    },
+    {
+      "N": 7,
+      "Np": 256,
+      "stage": 3,
+      "baseline_ratio": 1.0022685786253238,
+      "predicted_delta": -7.439755981554957e-06,
+      "measured_delta": -7.55349207849426e-06,
+      "ratio": 1.0152876112094649
+    },
+    {
+      "N": 9,
+      "Np": 576,
+      "stage": 2,
+      "baseline_ratio": 1.0013976468369603,
+      "predicted_delta": -1.1875808669706846e-06,
+      "measured_delta": -1.185107140233493e-06,
+      "ratio": 0.9979170035439341
+    },
+    {
+      "N": 9,
+      "Np": 576,
+      "stage": 3,
+      "baseline_ratio": 1.0013976468369603,
+      "predicted_delta": -1.7181789633025745e-06,
+      "measured_delta": -1.7169710318089022e-06,
+      "ratio": 0.9992969699202052
+    }
+  ]
+}

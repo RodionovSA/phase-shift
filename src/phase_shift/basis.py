@@ -21,7 +21,7 @@ import numpy as np
 def _coords(H: int, W: int, xp: ModuleType) -> tuple[np.ndarray, np.ndarray]:
     """Pixel coordinates centered on the field and scaled to about ``[-1, 1]``.
 
-    The convention of ``docs/sf_aia.md`` §1.2(i).
+    The convention of ``docs/sf_aia.md`` §"Algorithm" step 2.
 
     Parameters
     ----------
@@ -86,7 +86,7 @@ BASIS_REGISTRY: dict[str, Callable[..., np.ndarray]] = {
 BASES = list(BASIS_REGISTRY)
 
 
-def _centered_orthonormal(rows: np.ndarray, xp: ModuleType) -> np.ndarray:
+def _centered_orthonormal(rows: np.ndarray, xp: ModuleType, context: str) -> np.ndarray:
     """Center and orthonormalize ``rows`` in place, in order.
 
     Subtracts each row's spatial mean (``docs/interference_model.md`` Eq. 9a,
@@ -99,17 +99,33 @@ def _centered_orthonormal(rows: np.ndarray, xp: ModuleType) -> np.ndarray:
         Raw basis functions; overwritten.
     xp : module
         ``numpy`` or ``cupy``, matching ``rows``.
+    context : str
+        Field shape and family arguments, for the error message.
 
     Returns
     -------
     np.ndarray, shape (J, P), float64
         The same array, centered and orthonormalized.
+
+    Raises
+    ------
+    ValueError
+        If a row is constant over the field, or a combination of the rows
+        before it, and so cannot be normalized.
     """
     for j in range(rows.shape[0]):
+        raw_norm = float(xp.sqrt(xp.sum(rows[j] * rows[j])))
         col = rows[j] - rows[j].mean()
         for k in range(j):
             col = col - (col @ rows[k]) * rows[k]
-        rows[j] = col / float(xp.sqrt(xp.sum(col * col)))
+        norm = float(xp.sqrt(xp.sum(col * col)))
+        if norm <= 1e-8 * max(raw_norm, 1.0):
+            raise ValueError(
+                f"{context}: basis function {j} is constant over the field, or a "
+                f"combination of the functions before it, so it cannot be normalized; "
+                f"the field is too small or too thin for this family"
+            )
+        rows[j] = col / norm
     return rows
 
 
@@ -141,8 +157,11 @@ def spatial_basis(H: int, W: int, kind: str = "poly", xp: ModuleType = np,
     Raises
     ------
     ValueError
-        If ``kind`` is not registered, or the family rejects ``kwargs``.
+        If ``kind`` is not registered, if the family rejects ``kwargs``, or if
+        the field is too small for the family to produce independent
+        functions on it.
     """
     if kind not in BASIS_REGISTRY:
         raise ValueError(f"unknown basis {kind!r}, expected one of {BASES}")
-    return _centered_orthonormal(BASIS_REGISTRY[kind](H, W, xp, **kwargs), xp)
+    context = f"basis {kind!r} with {kwargs} on a {H}x{W} field"
+    return _centered_orthonormal(BASIS_REGISTRY[kind](H, W, xp, **kwargs), xp, context)
