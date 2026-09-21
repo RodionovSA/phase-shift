@@ -140,14 +140,13 @@ def frame_step(stack: np.ndarray, u: np.ndarray, v: np.ndarray,
     xp = get_array_module(stack, u, v)
     P = stack.shape[1]
     p = Precision.of(precision)
-    u64 = xp.asarray(u, dtype=xp.float64)
-    v64 = xp.asarray(v, dtype=xp.float64)
 
-    # (P,)-sized, so float64 whatever the precision: never touches stack.
-    Su, Sv = float(xp.sum(u64)), float(xp.sum(v64))
-    Suu = float(xp.sum(u64 * u64))
-    Svv = float(xp.sum(v64 * v64))
-    Suv = float(xp.sum(u64 * v64))
+    # Scalar pixel sums: accumulated in precision.accum, so no (P,)-sized copy
+    # of u or v is made.
+    Su, Sv = float(xp.sum(u, dtype=p.accum)), float(xp.sum(v, dtype=p.accum))
+    Suu = float(xp.sum(u * u, dtype=p.accum))
+    Svv = float(xp.sum(v * v, dtype=p.accum))
+    Suv = float(xp.sum(u * v, dtype=p.accum))
     BtB = xp.asarray([[float(P), Su, Sv], [Su, Suu, Suv], [Sv, Suv, Svv]])
 
     # The one reduction over the full stack, and so the one place

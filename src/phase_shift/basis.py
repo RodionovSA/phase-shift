@@ -17,6 +17,8 @@ from typing import Callable
 
 import numpy as np
 
+from .backend import Precision
+
 
 def _coords(H: int, W: int, xp: ModuleType) -> tuple[np.ndarray, np.ndarray]:
     """Pixel coordinates centered on the field and scaled to about ``[-1, 1]``.
@@ -131,7 +133,7 @@ def _centered_orthonormal(rows: np.ndarray, xp: ModuleType, context: str) -> np.
 
 @lru_cache(maxsize=32)
 def spatial_basis(H: int, W: int, kind: str = "poly", xp: ModuleType = np,
-                  **kwargs) -> np.ndarray:
+                  precision: "str | Precision | None" = None, **kwargs) -> np.ndarray:
     """Build an orthonormal, zero-spatial-mean basis on an ``(H, W)`` field.
 
     Cached per argument set, since a solve rebuilds the same basis every
@@ -145,14 +147,21 @@ def spatial_basis(H: int, W: int, kind: str = "poly", xp: ModuleType = np,
         Basis family, one of :data:`BASES`.
     xp : module, default numpy
         ``numpy`` or ``cupy``.
+    precision : str or Precision, optional
+        Dtypes to run in; see :class:`phase_shift.backend.Precision`. The rows
+        are returned in ``precision.accum``, the dtype they are multiplied
+        against the stack in. Centering and orthonormalization run in float64
+        whatever the precision: they are a one-off, cached, and modified
+        Gram-Schmidt in float32 loses orthogonality by about ``1e-5`` over a
+        megapixel field.
     **kwargs
         Passed to the family builder, e.g. ``degree`` for ``"poly"``.
 
     Returns
     -------
-    np.ndarray, shape (J, H*W), float64
-        Basis functions, flattened row-major. ``J`` depends on the family and
-        its arguments, and may be 0.
+    np.ndarray, shape (J, H*W)
+        Basis functions in ``precision.accum``, flattened row-major. ``J``
+        depends on the family and its arguments, and may be 0.
 
     Raises
     ------
@@ -164,4 +173,5 @@ def spatial_basis(H: int, W: int, kind: str = "poly", xp: ModuleType = np,
     if kind not in BASIS_REGISTRY:
         raise ValueError(f"unknown basis {kind!r}, expected one of {BASES}")
     context = f"basis {kind!r} with {kwargs} on a {H}x{W} field"
-    return _centered_orthonormal(BASIS_REGISTRY[kind](H, W, xp, **kwargs), xp, context)
+    rows = _centered_orthonormal(BASIS_REGISTRY[kind](H, W, xp, **kwargs), xp, context)
+    return rows.astype(Precision.of(precision).accum, copy=False)

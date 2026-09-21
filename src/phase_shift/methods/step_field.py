@@ -182,9 +182,10 @@ class StepFieldParam(MethodParam):
             Per-pixel phase standard deviation, in radians.
         """
         H, W = phi.shape
-        basis = spatial_basis(H, W, self.basis, xp, **self.basis_kwargs)
+        basis = spatial_basis(H, W, self.basis, xp, precision=self.precision,
+                              **self.basis_kwargs)
         return step_field_phi_error(b, phi, delta, g, fit_gain, noise_std, simplified,
-                                    basis, xp)
+                                    basis, xp, precision=self.precision)
 
     def print_summary(self) -> None:
         """Print the AIA diagnostics, then the step-field ones."""
@@ -216,8 +217,8 @@ class StepFieldParam(MethodParam):
         np.ndarray, shape (N, H, W)
         """
         calc_dtype = self.precision.accum
-        basis = spatial_basis(H, W, self.basis, xp, **self.basis_kwargs)
-        basis = basis.astype(calc_dtype, copy=False)                     # (J, P)
+        basis = spatial_basis(H, W, self.basis, xp, precision=self.precision,
+                              **self.basis_kwargs)                       # (J, P)
         coeffs = xp.asarray(self.coeffs, dtype=calc_dtype)
         N = delta.shape[0]
         field = delta[:, None] + coeffs.T @ basis                        # (N, P)

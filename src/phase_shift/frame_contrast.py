@@ -46,17 +46,18 @@ def _carrier_dc_amplitudes(stack: np.ndarray, dc_radius: int = 8,
         amplitudes unreliable.
     """
     xp = get_array_module(stack)
-    work_dtype = Precision.of(precision).work
+    p = Precision.of(precision)
+    work_dtype, acc = p.work, p.accum
     N, H, W = stack.shape
     win = (xp.outer(xp.hanning(H), xp.hanning(W)) if H > 1 and W > 1
            else xp.ones((H, W))).astype(work_dtype)
     Wc = W // 2 + 1
 
     # Locate the carrier peak in the frame-summed spectrum.
-    Psum = xp.zeros((H, Wc), dtype=xp.float64)
+    Psum = xp.zeros((H, Wc), dtype=acc)
     for s in range(0, N, frame_chunk):
         block = stack[s:s + frame_chunk].astype(work_dtype) * win
-        Psum += xp.abs(xp.fft.rfft2(block, axes=(1, 2))).astype(xp.float64).sum(0)
+        Psum += xp.abs(xp.fft.rfft2(block, axes=(1, 2))).sum(0, dtype=acc)
     Psum[:dc_radius, :dc_radius] = 0
     Psum[-dc_radius:, :dc_radius] = 0
     iy, ix = xp.unravel_index(xp.argmax(Psum), Psum.shape)
@@ -81,8 +82,8 @@ def _carrier_dc_amplitudes(stack: np.ndarray, dc_radius: int = 8,
         block = stack[s:s + frame_chunk].astype(work_dtype) * win
         Fc = xp.fft.rfft2(block, axes=(1, 2))
         amp_sq[s:s + block.shape[0]] = (
-            xp.abs(Fc[:, rows, :][:, :, c0:c1]).astype(xp.float64) ** 2
-        ).sum(axis=(1, 2))
+            xp.abs(Fc[:, rows, :][:, :, c0:c1]) ** 2
+        ).sum(axis=(1, 2), dtype=acc)
         dc_amp[s:s + block.shape[0]] = xp.abs(Fc[:, 0, 0]).astype(xp.float64)
 
     return xp.sqrt(amp_sq), dc_amp

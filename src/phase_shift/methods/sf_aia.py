@@ -26,7 +26,8 @@ from .steps import frame_step, pixel_step
 
 def fit_step_field(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.ndarray,
                    delta: np.ndarray, basis: np.ndarray, g: np.ndarray | None = None,
-                   chunk: int = 1_000_000) -> tuple[np.ndarray, np.ndarray]:
+                   chunk: int = 1_000_000, precision: str | Precision | None = None
+                   ) -> tuple[np.ndarray, np.ndarray]:
     """Fit each frame's step-field coefficients from the AIA residual.
 
     Solves ``G^(n) c = -h^(n)`` independently per frame, ``docs/sf_aia.md``
@@ -49,6 +50,9 @@ def fit_step_field(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.ndarra
         Per-frame fringe gain, as used in the pixel step. Defaults to ones.
     chunk : int, default 1_000_000
         Pixels accumulated per chunk; bounds memory, not the result.
+    precision : str or Precision, optional
+        Dtypes to run in; see :class:`phase_shift.backend.Precision`. Its
+        ``accum`` is the dtype of the per-chunk ``(N, Pc)`` arrays.
 
     Returns
     -------
@@ -83,9 +87,14 @@ def fit_step_field(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.ndarra
     xp = get_array_module(stack, a, u, v, delta, basis)
     N, P = stack.shape
     J = basis.shape[0]
+    acc = Precision.of(precision).accum
     delta = xp.asarray(delta, dtype=xp.float64)
     g = xp.ones(N, dtype=xp.float64) if g is None else xp.asarray(g, dtype=xp.float64)
-    c, s = xp.cos(delta), xp.sin(delta)
+    # Every operand of the (N, Pc) blocks below reaches accum first, so the
+    # blocks are never wider than the precision asks for.
+    basis = basis.astype(acc, copy=False)
+    g_a = g.astype(acc)
+    c, s = xp.cos(delta).astype(acc), xp.sin(delta).astype(acc)
 
     # Upper-triangle (j, j') pairs of G, in plain Python since J is small.
     iu = [jj for jj in range(J) for _ in range(jj, J)]
@@ -100,11 +109,11 @@ def fit_step_field(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.ndarra
         sl = slice(start, start + chunk)
         a_c, u_c, v_c = a[sl], u[sl], v[sl]
         basis_c = basis[:, sl]                                          # (J, Pc)
-        stack_c = stack[:, sl].astype(xp.float64)                       # (N, Pc)
+        stack_c = stack[:, sl].astype(acc, copy=False)                  # (N, Pc)
 
-        model_c = a_c[None, :] + g[:, None] * (xp.outer(c, u_c) + xp.outer(s, v_c))
+        model_c = a_c[None, :] + g_a[:, None] * (xp.outer(c, u_c) + xp.outer(s, v_c))
         resid_c = stack_c - model_c                                     # (N, Pc)
-        w_c = g[:, None] * (xp.outer(s, u_c) - xp.outer(c, v_c))        # (N, Pc)
+        w_c = g_a[:, None] * (xp.outer(s, u_c) - xp.outer(c, v_c))      # (N, Pc)
 
         pp_c = basis_c[iu, :] * basis_c[ju, :]                          # (K, Pc)
         G_flat += (w_c * w_c) @ pp_c.T                                  # (N, K)
@@ -231,7 +240,7 @@ def aia_step_field(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
     I = stack.reshape(N, -1).astype(p.work, copy=False)            # (N, P)
     g = xp.asarray(g, dtype=xp.float64)
     basis_kwargs = dict(basis_kwargs) if basis_kwargs else {}
-    basis_rows = spatial_basis(H, W, basis, xp, **basis_kwargs)    # (J, P) float64
+    basis_rows = spatial_basis(H, W, basis, xp, precision=p, **basis_kwargs)  # (J, P)
     basis_work = basis_rows.astype(p.work, copy=False)             # (J, P)
     J = basis_rows.shape[0]
 
@@ -258,7 +267,8 @@ def aia_step_field(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
     # through unchanged, as with refine_iters=0.
     for it in range(refine_iters if J > 0 else 0):
         Ic = I - c.astype(p.work)[:, None] if fit_gain else I
-        coeffs_it, cond = fit_step_field(Ic, a, u, v, delta, basis_rows, g=g)
+        coeffs_it, cond = fit_step_field(Ic, a, u, v, delta, basis_rows, g=g,
+                                         precision=p)
         kappa_it = float(xp.max(cond))
         rms_frac_it, _ = step_field_quality(Ic, a, u, v, delta, coeffs_it, basis_rows,
                                             H, W, g=g, crop=crop, precision=p)
@@ -291,7 +301,7 @@ def aia_step_field(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
 
         a, u, v = pixel_step(corrected_Ic, delta, g, precision=p)
         if fit_gain:
-            u, v = whiten_uv(u, v, xp)
+            u, v = whiten_uv(u, v, xp, precision=p)
         new_delta, new_g, new_c = frame_step(corrected, u, v, precision=p)
         delta = pin_phase_origin(new_delta)
         if fit_gain:
@@ -304,7 +314,8 @@ def aia_step_field(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
         a, u, v, delta, g, c, coeffs, kappa_fit, rms_frac = best
 
     aia_param = aia_diagnostics(I, delta, g, a, u, v, N, xp, aia_param0.iters_run,
-                                aia_param0.converged, c=(c if fit_gain else None))
+                                aia_param0.converged, c=(c if fit_gain else None),
+                                precision=p)
     method_param = SFAIAParam(
         aia_param=aia_param, basis=basis, basis_kwargs=basis_kwargs, coeffs=coeffs,
         coeffs_rms=xp.sqrt(xp.mean(coeffs ** 2, axis=1)), kappa_fit=kappa_fit,

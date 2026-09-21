@@ -109,7 +109,7 @@ def aia(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
             xp.subtract(I, c_fit.astype(p.work)[:, None], out=I_pixel)
         a, u, v = pixel_step(I_pixel, delta_fit, g_fit, precision=p)
         if fit_gain:
-            u, v = whiten_uv(u, v, xp)
+            u, v = whiten_uv(u, v, xp, precision=p)
         new_delta, new_g, new_c = frame_step(I, u, v, precision=p)
 
         new_delta = pin_phase_origin(new_delta)
@@ -134,5 +134,5 @@ def aia(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
     # Diagnostics describe what (a, u, v) were fit against, not the last
     # frame step's update.
     method_param = aia_diagnostics(I, delta_fit, g_fit, a, u, v, N, xp, it + 1, converged,
-                                   c=(c_fit if fit_gain else None))
+                                   c=(c_fit if fit_gain else None), precision=p)
     return a_map, b, phi, delta, g, method_param

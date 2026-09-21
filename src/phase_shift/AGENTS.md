@@ -50,10 +50,14 @@ Rules for the `phase_shift` package. The root `AGENTS.md` still applies.
   `float32`, and never add a second precision knob.
   - `p.work`: the large `(N, H, W)` / `(N, P)` arrays and the `(H, W)` fields
     recovered from them (`a`, `b`, `phi`, `phi_error`).
-  - `p.accum`: the dtype operands are cast to for a reduction or matrix
-    product over the full stack.
-  - Everything else -- small linear algebra, `(N,)` vectors, scalar
-    reductions, coordinate grids, bases -- is float64 whatever the precision.
+  - `p.accum`: every pixel-sized array that is not `work` -- the operands of a
+    reduction or matrix product over the full stack, the `(N, Pc)` blocks of a
+    chunked pass, the `(J, P)` basis, the `(P,)` fields of an error map. No
+    array whose size scales with the pixel count may be float64 unless
+    `p.accum` is.
+  - Everything else -- `(N,)` vectors, `(N, N)` / `(N*J, N*J)` / 3x3 / 2x2
+    matrices, and the `dtype=` accumulator of a reduction, which is free and
+    stays float64 -- is float64 whatever the precision.
 - Presets: `"single"` (work float32, accum float64, the default), `"double"`,
   `"fast"` (both float32). A `(N, P)` array must never come out wider than
   `p.work` by accident: cast the `(N,)` and `(J, P)` operands feeding it

@@ -13,6 +13,8 @@ from types import ModuleType
 
 import numpy as np
 
+from .backend import Precision
+
 
 def _frame_side(delta: np.ndarray, g: np.ndarray, xp: ModuleType) -> tuple[np.ndarray, ...]:
     """Frame-side quantities of ``docs/aia.md`` Eqs. (23)-(25) and (34).
@@ -47,7 +49,8 @@ def _frame_side(delta: np.ndarray, g: np.ndarray, xp: ModuleType) -> tuple[np.nd
 
 
 def _frame_step_weights(u: np.ndarray, v: np.ndarray, sigma0_sq: np.ndarray,
-                        xp: ModuleType) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+                        xp: ModuleType, acc: np.dtype
+                        ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """``docs/aia.md`` Eq. (38): the frame step's per-pixel weight and its covariance.
 
     Parameters
@@ -57,6 +60,8 @@ def _frame_step_weights(u: np.ndarray, v: np.ndarray, sigma0_sq: np.ndarray,
     sigma0_sq : np.ndarray, shape (H, W)
         Per-pixel noise variance, Eq. (32), in the working dtype.
     xp : module
+    acc : dtype
+        ``precision.accum``; the dtype the pixel sums accumulate in.
 
     Returns
     -------
@@ -65,28 +70,29 @@ def _frame_step_weights(u: np.ndarray, v: np.ndarray, sigma0_sq: np.ndarray,
     M : np.ndarray, shape (2, 2), float64
         ``sum ell ell^T sigma_0^2``, the ``{P, Q}`` block of Eq. (35).
     """
-    ones = xp.ones((), dtype=xp.float64)
-    su = xp.sum(u, dtype=xp.float64)
-    sv = xp.sum(v, dtype=xp.float64)
+    ones = xp.ones((), dtype=acc)
+    su = xp.sum(u, dtype=acc)
+    sv = xp.sum(v, dtype=acc)
     A_ps = xp.stack([
         xp.stack([ones * u.size, su, sv]),
-        xp.stack([su, xp.sum(u * u, dtype=xp.float64), xp.sum(u * v, dtype=xp.float64)]),
-        xp.stack([sv, xp.sum(u * v, dtype=xp.float64), xp.sum(v * v, dtype=xp.float64)]),
-    ])                                                                    # (3, 3)
+        xp.stack([su, xp.sum(u * u, dtype=acc), xp.sum(u * v, dtype=acc)]),
+        xp.stack([sv, xp.sum(u * v, dtype=acc), xp.sum(v * v, dtype=acc)]),
+    ]).astype(xp.float64)                                                 # (3, 3)
     Z = xp.linalg.pinv(A_ps)[1:].astype(u.dtype)                          # (2, 3)
 
     l0 = Z[0, 0] + Z[0, 1] * u + Z[0, 2] * v                              # (H, W)
     l1 = Z[1, 0] + Z[1, 1] * u + Z[1, 2] * v                              # (H, W)
-    m00 = xp.sum(l0 * l0 * sigma0_sq, dtype=xp.float64)
-    m01 = xp.sum(l0 * l1 * sigma0_sq, dtype=xp.float64)
-    m11 = xp.sum(l1 * l1 * sigma0_sq, dtype=xp.float64)
-    M = xp.stack([xp.stack([m00, m01]), xp.stack([m01, m11])])            # (2, 2)
+    m00 = xp.sum(l0 * l0 * sigma0_sq, dtype=acc)
+    m01 = xp.sum(l0 * l1 * sigma0_sq, dtype=acc)
+    m11 = xp.sum(l1 * l1 * sigma0_sq, dtype=acc)
+    M = xp.stack([xp.stack([m00, m01]), xp.stack([m01, m11])]).astype(xp.float64)
     return l0, l1, M
 
 
 def aia_phi_error_parts(b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: np.ndarray,
                         fit_gain: bool, sigma0: np.ndarray, simplified: bool,
-                        xp: ModuleType) -> tuple[np.ndarray, np.ndarray]:
+                        xp: ModuleType, precision: str | Precision | None = None
+                        ) -> tuple[np.ndarray, np.ndarray]:
     """``docs/aia.md``'s AIA phase-error map, exact to first order in the noise.
 
     The Eq. (26) baseline when ``simplified``; otherwise Eq. (45) when the
@@ -109,6 +115,8 @@ def aia_phi_error_parts(b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: np
         Return the Eq. (26) baseline alone, dropping the ``O(1/N_p)``
         fitted-step correction.
     xp : module
+    precision : str or Precision, optional
+        Dtypes to run in; see :class:`phase_shift.backend.Precision`.
 
     Returns
     -------
@@ -118,6 +126,7 @@ def aia_phi_error_parts(b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: np
         Eq. (34)'s leverage vectors.
     """
     work = b.dtype
+    acc = Precision.of(precision).accum
     delta64 = xp.asarray(delta, dtype=xp.float64)
     g64 = xp.asarray(g, dtype=xp.float64)
     N = delta64.shape[0]
@@ -136,7 +145,7 @@ def aia_phi_error_parts(b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: np
 
     u = b * xp.cos(phi)                                                   # (H, W), Eq. (2)
     v = -b * xp.sin(phi)
-    l0, l1, M = _frame_step_weights(u, v, sigma0_sq * xp.ones_like(b), xp)
+    l0, l1, M = _frame_step_weights(u, v, sigma0_sq * xp.ones_like(b), xp, acc)
     M_w = M.astype(work)
 
     # The correction is O(1/N_p), so it is accumulated on its own rather than
@@ -167,16 +176,17 @@ def _step_field_sensitivity(u: np.ndarray, v: np.ndarray, P_n: np.ndarray,
 
     Parameters
     ----------
-    u, v : np.ndarray, shape (P,), float64
+    u, v : np.ndarray, shape (P,)
         Quadrature fields, flattened, ``docs/aia.md`` Eq. (2).
-    P_n, Q_n : np.ndarray, shape (N,), float64
-        Per-frame quadrature coefficients, ``docs/aia.md`` Eq. (3).
+    P_n, Q_n : np.ndarray, shape (N,)
+        Per-frame quadrature coefficients, ``docs/aia.md`` Eq. (3), in ``u``'s
+        dtype so the returned block is not widened.
     sl : slice
         Pixels of this block.
 
     Returns
     -------
-    np.ndarray, shape (N, C), float64
+    np.ndarray, shape (N, C)
     """
     return Q_n[:, None] * u[None, sl] - P_n[:, None] * v[None, sl]
 
@@ -184,7 +194,8 @@ def _step_field_sensitivity(u: np.ndarray, v: np.ndarray, P_n: np.ndarray,
 def step_field_phi_error(b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
                          g: np.ndarray, fit_gain: bool, sigma0: np.ndarray,
                          simplified: bool, basis: np.ndarray, xp: ModuleType,
-                         chunk: int = 65_536) -> np.ndarray:
+                         chunk: int = 65_536,
+                         precision: str | Precision | None = None) -> np.ndarray:
     """``docs/sf_aia.md``'s step-field phase-error map, Eq. (E7).
 
     The AIA map of :func:`aia_phi_error_parts` plus the variance the fitted
@@ -204,14 +215,16 @@ def step_field_phi_error(b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
     simplified : bool
         Return the Eq. (26) baseline alone, dropping both the fitted-step
         correction and the step-field term; both are ``O(1/N_p)``.
-    basis : np.ndarray, shape (J, P), float64
+    basis : np.ndarray, shape (J, P)
         The step field's basis, from :func:`phase_shift.basis.spatial_basis`.
         An empty basis reduces this to the plain-``aia`` result.
     xp : module
     chunk : int, default 65536
-        Pixels reduced per block; bounds memory, not the result. The term is
-        a difference of larger quantities, so each block is accumulated in
-        float64 whatever the working dtype.
+        Pixels reduced per block; bounds memory, not the result.
+    precision : str or Precision, optional
+        Dtypes to run in; see :class:`phase_shift.backend.Precision`. The term
+        is a difference of larger quantities, so ``precision.accum`` carries
+        every pixel-sized block; the ``(N*J, N*J)`` matrices stay float64.
 
     Notes
     -----
@@ -223,12 +236,14 @@ def step_field_phi_error(b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
     np.ndarray, shape (H, W)
         ``sigma_Phi(x, y)``, in radians.
     """
-    phi_var, k = aia_phi_error_parts(b, phi, delta, g, fit_gain, sigma0, simplified, xp)
+    acc = Precision.of(precision).accum
+    phi_var, k = aia_phi_error_parts(b, phi, delta, g, fit_gain, sigma0, simplified, xp,
+                                     precision=precision)
     if simplified:
         return xp.sqrt(phi_var)
 
     H, W = phi.shape
-    basis = xp.asarray(basis, dtype=xp.float64)                           # (J, P)
+    basis = xp.asarray(basis, dtype=acc)                                  # (J, P)
     J = basis.shape[0]
     if J == 0:
         return xp.sqrt(phi_var)
@@ -238,15 +253,18 @@ def step_field_phi_error(b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
     g64 = xp.asarray(g, dtype=xp.float64)
     P_n = g64 * xp.cos(delta64)                                           # (N,), Eq. (3)
     Q_n = g64 * xp.sin(delta64)
-    phi64 = xp.asarray(phi, dtype=xp.float64).reshape(-1)                 # (P,)
-    b64 = xp.asarray(b, dtype=xp.float64).reshape(-1)
-    u = b64 * xp.cos(phi64)                                               # (P,), Eq. (2)
-    v = -b64 * xp.sin(phi64)
-    del phi64, b64
+    phi_a = xp.asarray(phi, dtype=acc).reshape(-1)                        # (P,)
+    b_a = xp.asarray(b, dtype=acc).reshape(-1)
+    u = b_a * xp.cos(phi_a)                                               # (P,), Eq. (2)
+    v = -b_a * xp.sin(phi_a)
+    del phi_a, b_a
     P_tot = u.shape[0]
-    sigma0_sq = xp.asarray(sigma0, dtype=xp.float64) ** 2
+    sigma0_sq = xp.asarray(sigma0, dtype=acc) ** 2
     sigma0_sq = (sigma0_sq.reshape(-1) if sigma0_sq.ndim else sigma0_sq) \
-        * xp.ones(P_tot, dtype=xp.float64)                                # (P,)
+        * xp.ones(P_tot, dtype=acc)                                       # (P,)
+    # The (N,) coefficients stay float64, but the blocks below are pixel-sized:
+    # they take accum copies so a float64 (N,) operand cannot widen them.
+    P_a, Q_a = P_n.astype(acc), Q_n.astype(acc)
     blocks = [slice(s, min(s + chunk, P_tot)) for s in range(0, P_tot, chunk)]
 
     # First pass: Eq. (E7)'s noise-weighted cross-frame matrices D_n^T L D_m,
@@ -254,30 +272,30 @@ def step_field_phi_error(b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
     DLD = xp.zeros((N * J, N * J), dtype=xp.float64)
     G = xp.zeros((N, J, J), dtype=xp.float64)
     for sl in blocks:
-        w_field = _step_field_sensitivity(u, v, P_n, Q_n, sl)             # (N, C)
+        w_field = _step_field_sensitivity(u, v, P_a, Q_a, sl)             # (N, C)
         rows = (w_field[:, None, :] * basis[None, :, sl]).reshape(N * J, -1)
-        DLD += (rows * sigma0_sq[None, sl]) @ rows.T
+        DLD += ((rows * sigma0_sq[None, sl]) @ rows.T).astype(xp.float64)
         for n in range(N):
             block = rows[n * J:(n + 1) * J]
-            G[n] += block @ block.T
+            G[n] += (block @ block.T).astype(xp.float64)
     G_inv = xp.linalg.pinv(G)                                             # (N, J, J)
     K = xp.einsum('nja,namb,mbk->njmk', G_inv, DLD.reshape(N, J, N, J), G_inv)
 
     # Pi removes from a column over frames its pixel-step fit, docs/vp_aia.md Eq. (18).
     A = xp.stack([xp.ones(N, dtype=xp.float64), P_n, Q_n], axis=1)        # (N, 3)
     Pi = xp.eye(N, dtype=xp.float64) - A @ xp.linalg.pinv(A.T @ A) @ A.T  # (N, N)
-    weight = (Pi[:, None, :, None] * K).reshape(N * J, N * J)             # (N*J, N*J)
+    weight = (Pi[:, None, :, None] * K).reshape(N * J, N * J).astype(acc)  # (N*J, N*J)
 
     # Second pass: t_n = s_n w_n, frame-centered by Eq. (E4), then Eq. (E7)'s
     # quadratic form. With w = (sin Phi, cos Phi) = (-v, u)/b, Eq. (E7)'s
     # s_n = -(w . k_n)/b is (k_n0 v - k_n1 u)/b^2.
-    k64 = xp.asarray(k, dtype=xp.float64)
-    floor = xp.asarray(xp.finfo(xp.float64).eps, dtype=xp.float64)
-    extra = xp.empty(P_tot, dtype=xp.float64)
+    k_a = xp.asarray(k, dtype=acc)
+    floor = xp.asarray(xp.finfo(xp.float64).eps, dtype=acc)
+    extra = xp.empty(P_tot, dtype=acc)
     for sl in blocks:
-        w_field = _step_field_sensitivity(u, v, P_n, Q_n, sl)             # (N, C)
+        w_field = _step_field_sensitivity(u, v, P_a, Q_a, sl)             # (N, C)
         b2 = xp.maximum(u[sl] ** 2 + v[sl] ** 2, floor)                   # (C,)
-        s_n = (k64[0][:, None] * v[None, sl] - k64[1][:, None] * u[None, sl]) / b2[None, :]
+        s_n = (k_a[0][:, None] * v[None, sl] - k_a[1][:, None] * u[None, sl]) / b2[None, :]
         t = s_n * w_field                                                 # (N, C)
         t = t - xp.mean(t, axis=0, keepdims=True)
         z = (t[:, None, :] * basis[None, :, sl]).reshape(N * J, -1)

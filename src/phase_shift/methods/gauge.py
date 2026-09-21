@@ -5,13 +5,22 @@ from types import ModuleType
 
 import numpy as np
 
+from ..backend import Precision
 
-def whiten_uv(u: np.ndarray, v: np.ndarray, xp: ModuleType) -> tuple[np.ndarray, np.ndarray]:
-    """Rotate and shear ``(u, v)`` to equal energy and zero correlation.
 
-    Imposes ``sum(u**2) == sum(v**2)`` and ``sum(u*v) == 0``, ``docs/aia.md``
-    Eq. (15), fixing the shear and anisotropic scaling of the quadrature-basis
-    freedom Eq. (13). Applied after every pixel step that fits the gain.
+def whitening_matrix(u: np.ndarray, v: np.ndarray, xp: ModuleType,
+                     precision: str | Precision | None = None) -> np.ndarray:
+    """Return the symmetric 2x2 transform that whitens ``(u, v)``.
+
+    ``T = s * G^(-1/2)``, with ``G = [[sum u^2, sum uv], [sum uv, sum v^2]]``
+    and ``s = sqrt((sum u^2 + sum v^2) / 2)``: applying ``T`` to ``(u, v)``
+    imposes ``sum(u**2) == sum(v**2)`` and ``sum(u*v) == 0`` while preserving
+    their total energy, ``docs/aia.md`` Eq. (15) and ``docs/vp_aia.md``
+    §"Normalization" step 2.
+
+    The model is unchanged by applying ``T`` to ``(u, v)`` and ``T^-1`` to
+    ``(P_n, Q_n)``, ``docs/vp_aia.md`` §"Quadrature frame". A caller holding no
+    ``(P_n, Q_n)`` to transform wants :func:`whiten_uv` instead.
 
     Parameters
     ----------
@@ -19,28 +28,54 @@ def whiten_uv(u: np.ndarray, v: np.ndarray, xp: ModuleType) -> tuple[np.ndarray,
         Quadrature components.
     xp : module
         ``numpy`` or ``cupy``, matching ``u``/``v``.
+    precision : str or Precision, optional
+        Dtypes to run in; see :class:`phase_shift.backend.Precision`. The three
+        pixel sums accumulate in ``precision.accum``.
+
+    Returns
+    -------
+    np.ndarray, shape (2, 2), float64
+        Symmetric; a host NumPy array whatever ``xp`` is.
+    """
+    acc = Precision.of(precision).accum
+    Suu = float(xp.sum(u * u, dtype=acc))
+    Svv = float(xp.sum(v * v, dtype=acc))
+    Suv = float(xp.sum(u * v, dtype=acc))
+    eps = np.finfo(float).eps
+    scale = np.sqrt(max((Suu + Svv) / 2, eps))
+
+    G = np.array([[Suu, Suv], [Suv, Svv]])
+    w, V = np.linalg.eigh(G)
+    w = np.maximum(w, eps)
+    return (V * (scale / np.sqrt(w))) @ V.T           # symmetric, scale * G^(-1/2)
+
+
+def whiten_uv(u: np.ndarray, v: np.ndarray, xp: ModuleType,
+              precision: str | Precision | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """Rotate and shear ``(u, v)`` to equal energy and zero correlation.
+
+    Imposes ``sum(u**2) == sum(v**2)`` and ``sum(u*v) == 0``, ``docs/aia.md``
+    Eq. (15), fixing the shear and anisotropic scaling of the quadrature-basis
+    freedom Eq. (13). Applied after every pixel step that fits the gain, which
+    refits ``(P_n, Q_n)`` afterwards rather than transforming them.
+
+    Parameters
+    ----------
+    u, v : np.ndarray, shape (P,)
+        Quadrature components.
+    xp : module
+        ``numpy`` or ``cupy``, matching ``u``/``v``.
+    precision : str or Precision, optional
+        Dtypes to run in; see :class:`phase_shift.backend.Precision`.
 
     Returns
     -------
     u, v : np.ndarray, shape (P,)
         Whitened components, in the input dtype.
     """
-    u64, v64 = u.astype(xp.float64), v.astype(xp.float64)
-    Suu = float(xp.sum(u64 * u64))
-    Svv = float(xp.sum(v64 * v64))
-    Suv = float(xp.sum(u64 * v64))
-    eps = np.finfo(float).eps
-    scale = np.sqrt(max((Suu + Svv) / 2, eps))
-
-    K = np.array([[Suu, Suv], [Suv, Svv]])
-    w, V = np.linalg.eigh(K)
-    w = np.maximum(w, eps)
-    M = (V * (scale / np.sqrt(w))) @ V.T              # symmetric, scale * K^(-1/2)
-    m00, m01, m11 = float(M[0, 0]), float(M[0, 1]), float(M[1, 1])
-
-    u_new = u * m00 + v * m01
-    v_new = u * m01 + v * m11
-    return u_new, v_new
+    T = whitening_matrix(u, v, xp, precision)
+    m00, m01, m11 = float(T[0, 0]), float(T[0, 1]), float(T[1, 1])
+    return u * m00 + v * m01, u * m01 + v * m11
 
 
 def pin_phase_origin(delta: np.ndarray) -> np.ndarray:
