@@ -17,7 +17,9 @@
 
 The first two documents are settled foundations. Do not revise their mathematics
 without explicit agreement; discuss proposed SF-AIA or VP-AIA changes before
-updating their theory and implementation.
+updating their theory and implementation. Both of the user's methods are
+implemented (`methods/sf_aia.py`, `methods/vp_aia.py` with `methods/vp_system.py`),
+so revising either theory means revising code that follows it.
 
 ## Reading rules
 

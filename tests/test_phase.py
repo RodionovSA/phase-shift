@@ -17,12 +17,17 @@ from phase_shift import (
     remove_carrier,
     subtract_reference,
 )
+from phase_shift import METHODS
 from phase_shift.backend import CUPY_AVAILABLE, Precision, get_precision, set_precision
 from phase_shift.basis import BASES, spatial_basis
 from phase_shift.methods import MethodParam
 from phase_shift.methods.gauge import (center_coeffs, center_offsets, normalize_gain,
-                                       pin_phase_origin, whiten_uv)
+                                       normalize_quadrature_frame, pin_phase_origin,
+                                       whiten_uv, whitening_matrix)
+from phase_shift.errors import aia_phi_error_parts, vp_phi_error
+from phase_shift.methods.steps import pixel_step
 from phase_shift.methods.step_field import step_field_quality
+from phase_shift.methods.vp_system import fit_frame_and_coeffs, max_modes
 from phase_shift.utils import wrap
 
 
@@ -156,11 +161,12 @@ class TestPrecision:
         stack, truth = make_stack()
         for name, work in (("single", np.float32), ("double", np.float64),
                            ("fast", np.float32)):
-            for method in ("aia", "sf_aia"):
+            for method in METHODS:
                 kw = {"iters": 10} if method == "aia" else {"iters": 10, "crop": 5}
-                cfg = PhaseConfig(method=method, gain_mode="none", method_kwargs=kw)
+                gain = "joint" if method == "vp_aia" else "none"
+                cfg = PhaseConfig(method=method, gain_mode=gain, method_kwargs=kw)
                 r = PhaseSolver(cfg, precision=name).fit(stack).result
-                assert r.precision == Precision.of(name)
+                assert r.precision == Precision.of(name), method
                 assert r.phi.dtype == r.a.dtype == r.b.dtype == work
                 assert r.phi_error.dtype == work
                 # (N,) vectors stay float64 whatever the precision.
@@ -518,6 +524,25 @@ class TestWrap:
         assert np.max(np.abs(wrap(x) - ref)) < 1e-12
 
 
+def _quadrature_case(H=40, W=50, N=7, seed=20, dtype=np.float64):
+    """A quadrature solution off the conventional frame in every way at once.
+
+    Sheared and anisotropic `(u, v)`, a background correlated with both, a
+    nonzero first step and a gain whose median is not 1 -- so each of
+    `docs/vp_aia.md` §"Normalization" steps 1-4 has something to do.
+    """
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:H, 0:W]
+    phi = (0.35 * xx + 0.22 * yy).ravel()
+    b = (40 + 5 * np.sin(0.02 * yy)).ravel()
+    u = (b * np.cos(phi)).astype(dtype)
+    v = (-0.7 * b * np.sin(phi) + 0.3 * b * np.cos(phi)).astype(dtype)   # sheared
+    a = (120 + 0.4 * u + 0.25 * v).astype(dtype)                         # correlated
+    delta = np.sort(rng.uniform(0.3, 2 * np.pi, N))
+    g = 2.5 * (1 + 0.1 * rng.standard_normal(N))                         # median != 1
+    return a, u, v, g * np.cos(delta), g * np.sin(delta)
+
+
 class TestGaugeConventions:
     """Each convention of `docs/gauge_conventions.md`, on its own helper."""
 
@@ -560,6 +585,59 @@ class TestGaugeConventions:
         c_c = center_offsets(c, np)
         assert abs(float(np.mean(c_c))) < 1e-12               # Eq. (16)
         assert np.allclose(np.diff(c_c), np.diff(c))
+
+    def test_whitening_matrix_paired_transform_preserves_model(self):
+        # docs/vp_aia.md §"Quadrature frame": T on (u, v) and T^-1 on
+        # (P_n, Q_n) leave a + P_n u + Q_n v unchanged.
+        rng = np.random.default_rng(21)
+        P, N = 3000, 7
+        u = rng.standard_normal(P) * 2.0
+        v = 0.6 * u + rng.standard_normal(P) * 0.4
+        P_n, Q_n = rng.standard_normal(N), rng.standard_normal(N)
+        before = np.outer(P_n, u) + np.outer(Q_n, v)
+        T = whitening_matrix(u, v, np)
+        Ti = np.linalg.inv(T)
+        u_w, v_w = u * T[0, 0] + v * T[0, 1], u * T[1, 0] + v * T[1, 1]
+        P_w, Q_w = P_n * Ti[0, 0] + Q_n * Ti[1, 0], P_n * Ti[0, 1] + Q_n * Ti[1, 1]
+        after = np.outer(P_w, u_w) + np.outer(Q_w, v_w)
+        assert np.max(np.abs(after - before)) < 1e-10 * np.max(np.abs(before))
+
+    def test_normalize_quadrature_frame_imposes_all_conditions(self):
+        a, u, v, P_n, Q_n = _quadrature_case()
+        a, u, v, P_n, Q_n = normalize_quadrature_frame(a, u, v, P_n, Q_n, np)
+        ac = a - a.mean()
+        scale = np.sum(u ** 2)
+        assert abs(np.sum(ac * u)) < 1e-8 * scale            # step 1, shift
+        assert abs(np.sum(ac * v)) < 1e-8 * scale
+        assert abs(np.sum(u ** 2) - np.sum(v ** 2)) < 1e-8 * scale   # step 2
+        assert abs(np.sum(u * v)) < 1e-8 * scale
+        assert abs(float(np.arctan2(Q_n[0], P_n[0]))) < 1e-12        # step 3
+        assert abs(float(np.median(np.hypot(P_n, Q_n))) - 1.0) < 1e-12   # step 4
+
+    def test_normalize_quadrature_frame_preserves_the_model(self):
+        # Every step is a reparametrization of docs/vp_aia.md Eq. (5).
+        a, u, v, P_n, Q_n = _quadrature_case()
+        before = a[None, :] + np.outer(P_n, u) + np.outer(Q_n, v)
+        out = normalize_quadrature_frame(a, u, v, P_n, Q_n, np)
+        a2, u2, v2, P2, Q2 = out
+        after = a2[None, :] + np.outer(P2, u2) + np.outer(Q2, v2)
+        assert np.max(np.abs(after - before)) < 1e-9 * np.max(np.abs(before))
+
+    def test_normalize_quadrature_frame_is_idempotent(self):
+        first = normalize_quadrature_frame(*_quadrature_case(), np)
+        second = normalize_quadrature_frame(*first, np)
+        for x, y in zip(first, second):
+            assert np.allclose(x, y, atol=1e-10, rtol=1e-10)
+
+    @pytest.mark.parametrize("precision,work", [("single", np.float32),
+                                                ("fast", np.float32),
+                                                ("double", np.float64)])
+    def test_normalize_quadrature_frame_dtypes(self, precision, work):
+        a, u, v, P_n, Q_n = _quadrature_case(dtype=work)
+        a, u, v, P_n, Q_n = normalize_quadrature_frame(a, u, v, P_n, Q_n, np,
+                                                       precision=precision)
+        assert a.dtype == u.dtype == v.dtype == work     # fields keep work dtype
+        assert P_n.dtype == Q_n.dtype == np.float64      # (N,) vectors stay float64
 
     def test_center_coeffs_sets_frame_mean_to_zero_per_term(self):
         rng = np.random.default_rng(13)
@@ -717,3 +795,405 @@ class TestPhaseError:
         err = solver.result.phi_error
         assert err is not None and err.shape == truth["phi"].shape
         assert np.all(np.isfinite(err)) and np.all(err > 0)
+
+
+def _vp_case(H=40, W=50, N=9, seed=31, degree=1, amp=0.02, dtype=np.float64):
+    """A stack with a planted first-order step field, already in the conventional frame.
+
+    Returns the flattened fields VP-AIA's first-order pass takes as input,
+    together with the planted `alpha` (docs/vp_aia.md Eq. 13).
+    """
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:H, 0:W]
+    phi = (0.35 * xx + 0.22 * yy).ravel()
+    a = (120 + 8 * np.cos(0.01 * xx)).ravel()
+    b = (45 + 3 * np.sin(0.02 * yy)).ravel()
+    delta = np.sort(rng.uniform(0, 2 * np.pi, N))
+    delta -= delta[0]
+    g = 1 + 0.05 * rng.standard_normal(N)
+    g /= np.median(g)
+    basis = spatial_basis(H, W, "poly", np, degree=degree)
+    alpha = rng.standard_normal((N, basis.shape[0])) * amp * np.sqrt(H * W)
+    alpha -= alpha.mean(0)                                   # Eq. (24)
+    Delta = alpha @ basis                                    # (N, P)
+    stack = (a[None] + g[:, None] * b[None]
+             * np.cos(phi[None] + delta[:, None] + Delta)).astype(dtype)
+    # Zeroth order as docs/vp_aia.md §"VP-AIA algorithm" step 1 builds it: a
+    # pixel step at the true (P_n, Q_n), then normalization. Eq. (20) needs the
+    # pixel-step residual, not just fields that fit.
+    P_n, Q_n = g * np.cos(delta), g * np.sin(delta)
+    a0, u0, v0 = pixel_step(stack, delta, g, precision="double")
+    a0, u0, v0, P_n, Q_n = normalize_quadrature_frame(a0, u0, v0, P_n, Q_n, np)
+    return stack, a0, u0, v0, P_n, Q_n, basis, alpha
+
+
+class TestVPSystem:
+    """`docs/vp_aia.md` Eqs. (22)-(25), the first-order normal system."""
+
+    def test_recovers_planted_coefficients(self):
+        stack, a, u, v, P_n, Q_n, basis, alpha_true = _vp_case()
+        sol = fit_frame_and_coeffs(stack, a, u, v, P_n, Q_n, basis)
+        rel = np.abs(sol.alpha - alpha_true).max() / np.abs(alpha_true).max()
+        assert rel < 1e-2, rel
+
+    def test_unfitted_fields_are_rejected_by_the_math(self):
+        # Eq. (21) assumes Pi leaves the residual unchanged, which holds only
+        # for the pixel-step residual. Fields that merely fit the data -- here
+        # the exact truth -- break the fit, so the docstring's precondition is
+        # a real one, not a formality.
+        stack, _, _, _, _, _, basis, alpha_true = _vp_case()
+        H, W, N = 40, 50, 9
+        rng = np.random.default_rng(31)
+        yy, xx = np.mgrid[0:H, 0:W]
+        phi = (0.35 * xx + 0.22 * yy).ravel()
+        a_t = (120 + 8 * np.cos(0.01 * xx)).ravel()
+        b_t = (45 + 3 * np.sin(0.02 * yy)).ravel()
+        delta = np.sort(rng.uniform(0, 2 * np.pi, N)); delta -= delta[0]
+        g = 1 + 0.05 * rng.standard_normal(N); g /= np.median(g)
+        sol = fit_frame_and_coeffs(stack, a_t, b_t * np.cos(phi), -b_t * np.sin(phi),
+                                   g * np.cos(delta), g * np.sin(delta), basis)
+        rel = np.abs(sol.alpha - alpha_true).max() / np.abs(alpha_true).max()
+        assert rel > 0.5, rel
+
+    def test_solution_satisfies_eq24(self):
+        stack, a, u, v, P_n, Q_n, basis, _ = _vp_case()
+        sol = fit_frame_and_coeffs(stack, a, u, v, P_n, Q_n, basis)
+        N = len(P_n)
+        A = np.column_stack([np.ones(N), P_n, Q_n])
+        # A' P1 sums N terms of size |P1|, so that product is the scale the
+        # six conditions are satisfied against.
+        scale = N * max(np.abs(sol.P_corr).max(), np.abs(sol.Q_corr).max())
+        assert np.max(np.abs(A.T @ sol.P_corr)) < 1e-10 * scale    # six conditions
+        assert np.max(np.abs(A.T @ sol.Q_corr)) < 1e-10 * scale
+        assert np.max(np.abs(sol.alpha.mean(0))) < 1e-10 * np.abs(sol.alpha).max()
+
+    def test_chunking_does_not_change_the_result(self):
+        stack, a, u, v, P_n, Q_n, basis, _ = _vp_case()
+        whole = fit_frame_and_coeffs(stack, a, u, v, P_n, Q_n, basis, chunk=10 ** 9)
+        pieces = fit_frame_and_coeffs(stack, a, u, v, P_n, Q_n, basis, chunk=137)
+        # Chunking only reorders the pixel sums, so the difference is the
+        # float64 summation order alone. It lands on each vector as a whole,
+        # so the tolerance goes on the vector's scale, not on each component's
+        # own magnitude.
+        assert whole.kappa_vp == pytest.approx(pieces.kappa_vp, rel=1e-9)
+        for got, ref in ((pieces.alpha, whole.alpha), (pieces.P_corr, whole.P_corr),
+                         (pieces.Q_corr, whole.Q_corr)):
+            assert np.max(np.abs(got - ref)) < 1e-10 * np.max(np.abs(ref))
+
+    def test_conditioning_does_not_track_the_pixel_count(self):
+        # Regression: the modes are solved in Eq. (30)'s <H_j H_k> = delta
+        # convention and Eq. (24)'s rows are weighted to M's scale. Without
+        # either, kappa_vp grew linearly with K and reported the frame size
+        # rather than the quality of the fit.
+        kappas = []
+        for H, W in ((30, 40), (60, 80), (120, 160)):
+            stack, a, u, v, P_n, Q_n, basis, _ = _vp_case(H=H, W=W)
+            kappas.append(fit_frame_and_coeffs(stack, a, u, v, P_n, Q_n, basis).kappa_vp)
+        assert max(kappas) < 1e3, kappas                 # not 1e6 and rising
+        assert max(kappas) / min(kappas) < 2.0, kappas   # K grew 16x
+
+    def test_projector_identities(self):
+        # docs/vp_aia.md Eq. (18): Pi A = 0, Pi^2 = Pi, rank N-3.
+        rng = np.random.default_rng(5)
+        N = 8
+        P_n, Q_n = rng.standard_normal(N), rng.standard_normal(N)
+        A = np.column_stack([np.ones(N), P_n, Q_n])
+        Pi = np.eye(N) - A @ np.linalg.pinv(A.T @ A) @ A.T
+        assert np.max(np.abs(Pi @ A)) < 1e-12
+        assert np.max(np.abs(Pi @ Pi - Pi)) < 1e-12
+        assert np.linalg.matrix_rank(Pi) == N - 3
+
+    def test_too_few_frames_raises(self):
+        stack, a, u, v, P_n, Q_n, basis, _ = _vp_case(N=4)
+        with pytest.raises(ValueError, match="at least 5 frames"):
+            fit_frame_and_coeffs(stack, a, u, v, P_n, Q_n, basis)
+
+    def test_too_many_modes_raises(self):
+        stack, a, u, v, P_n, Q_n, basis, _ = _vp_case(H=4, W=4, N=6, degree=3)
+        with pytest.raises(ValueError, match="identifiable maximum"):
+            fit_frame_and_coeffs(stack, a, u, v, P_n, Q_n, basis)
+
+    def test_max_modes_matches_eq15(self):
+        for N, K in ((5, 1000), (9, 2000), (32, 10 ** 6)):
+            assert max_modes(N, K) == ((N - 3) * (K - 2)) // (N - 1)
+        assert max_modes(3, 1000) == 0
+
+    def test_empty_basis_gives_only_frame_corrections(self):
+        stack, a, u, v, P_n, Q_n, _, _ = _vp_case()
+        empty = spatial_basis(40, 50, "poly", np, degree=0)
+        sol = fit_frame_and_coeffs(stack, a, u, v, P_n, Q_n, empty)
+        assert sol.alpha.shape == (len(P_n), 0)
+        assert sol.P_corr.shape == (len(P_n),)
+
+    @pytest.mark.parametrize("precision", ["single", "fast", "double"])
+    def test_precision_presets_agree(self, precision):
+        stack, a, u, v, P_n, Q_n, basis, alpha_true = _vp_case(dtype=np.float32)
+        sol = fit_frame_and_coeffs(stack, a, u, v, P_n, Q_n, basis, precision=precision)
+        rel = np.abs(sol.alpha - alpha_true).max() / np.abs(alpha_true).max()
+        assert rel < 5e-2, rel
+        assert sol.alpha.dtype == np.float64        # the (2N+NJ) system is float64
+
+
+def make_vp_stack(H=90, W=110, N=12, seed=11, amp=0.03, degree=1, dtype=np.float32):
+    """Stack whose phase step carries a first-order spatial error on top of the piston.
+
+    Built from the same mode family VP-AIA fits, with `docs/vp_aia.md`
+    Eq. (13)'s zero frame mean, so the planted field is exactly representable.
+    """
+    rng = np.random.default_rng(seed)
+    K = H * W
+    yy, xx = np.mgrid[0:H, 0:W]
+    phi = np.angle(np.exp(1j * (0.35 * xx + 0.22 * yy)))
+    a = 120 + 8 * np.cos(0.01 * xx)
+    b = 45 + 3 * np.sin(0.02 * yy)
+    delta = np.sort(rng.uniform(0, 2 * np.pi, N))
+    delta -= delta[0]
+    g = 1 + 0.05 * rng.standard_normal(N)
+    g /= np.median(g)
+    basis = spatial_basis(H, W, "poly", np, degree=degree)
+    alpha = rng.standard_normal((N, basis.shape[0])) * amp * np.sqrt(K)
+    alpha -= alpha.mean(0)                                   # Eq. (24)
+    Delta = (alpha @ basis).reshape(N, H, W)
+    stack = (a[None] + g[:, None, None] * b[None]
+             * np.cos(phi[None] + delta[:, None, None] + Delta))
+    return stack.astype(dtype), dict(phi=phi, delta=delta, g=g, alpha=alpha,
+                                     Delta=Delta, basis=basis)
+
+
+class TestVPAIA:
+    """`docs/vp_aia.md` end to end, through `PhaseSolver`."""
+
+    @staticmethod
+    def _solve(stack, method, **kw):
+        cfg = PhaseConfig(method=method, gain_mode="joint", use_alpha=False,
+                          method_kwargs={"iters": 60, "tol": 1e-10, **kw})
+        return PhaseSolver(cfg, precision="double").fit(stack).result
+
+    def test_beats_plain_aia_on_a_step_field(self):
+        stack, truth = make_vp_stack()
+        base = self._solve(stack, "aia")
+        vp = self._solve(stack, "vp_aia", basis_kwargs={"degree": 1}, crop=10)
+        e_base = circ_rms_deg(base.phi - np.median(base.phi - truth["phi"]), truth["phi"])
+        e_vp = circ_rms_deg(vp.phi - np.median(vp.phi - truth["phi"]), truth["phi"])
+        assert e_vp < e_base / 5, (e_vp, e_base)
+
+    def test_recovers_the_planted_step_field(self):
+        stack, truth = make_vp_stack()
+        r = self._solve(stack, "vp_aia", basis_kwargs={"degree": 1}, crop=10)
+        alpha = r.method_param.coeffs.T                      # (N, J)
+        rel = np.abs(alpha - truth["alpha"]).max() / np.abs(truth["alpha"]).max()
+        assert rel < 0.1, rel
+
+    def test_step_field_keeps_both_zero_means(self):
+        # docs/vp_aia.md Eq. (13): <H_j>_xy = 0 by construction, and Eq. (24)
+        # supplies <alpha_nj>_n = 0.
+        stack, truth = make_vp_stack()
+        r = self._solve(stack, "vp_aia", basis_kwargs={"degree": 2}, crop=10)
+        mp = r.method_param
+        assert np.max(np.abs(mp.coeffs.mean(axis=1))) < 1e-9 * np.abs(mp.coeffs).max()
+        field = mp.phase_step_field(r.delta, *r.phi.shape, np)
+        spatial_mean = field.reshape(len(r.delta), -1).mean(axis=1) - r.delta
+        assert np.max(np.abs(spatial_mean)) < 1e-9
+
+    def test_fixed_gain_raises(self):
+        # docs/vp_aia.md derives Eq. (24) with (P_n, Q_n) free; the fixed-gain
+        # case is not derived, so the method refuses rather than inventing it.
+        stack, _ = make_vp_stack()
+        for cfg in (PhaseConfig(method="vp_aia", gain_mode="none"),
+                    PhaseConfig(method="vp_aia", g=np.ones(stack.shape[0]))):
+            with pytest.raises(ValueError, match="gain_mode='joint'"):
+                PhaseSolver(cfg).fit(stack)
+
+    def test_too_few_frames_raises(self):
+        stack, _ = make_vp_stack(N=4)
+        cfg = PhaseConfig(method="vp_aia", gain_mode="joint", use_alpha=False,
+                          method_kwargs={"basis_kwargs": {"degree": 1}, "crop": 5})
+        with pytest.raises(ValueError, match="at least 5 frames"):
+            PhaseSolver(cfg).fit(stack)
+
+    def test_empty_basis_leaves_the_aia_solution(self):
+        stack, truth = make_vp_stack(amp=0.0)
+        base = self._solve(stack, "aia")
+        vp = self._solve(stack, "vp_aia", basis_kwargs={"degree": 0}, crop=10)
+        assert vp.method_param.coeffs.shape == (0, stack.shape[0])
+        assert circ_rms_deg(vp.phi, base.phi) < 1e-3
+
+    def test_kappa_fit_is_the_joint_system(self):
+        stack, _ = make_vp_stack()
+        r = self._solve(stack, "vp_aia", basis_kwargs={"degree": 1}, crop=10)
+        # The one system of Eq. (25), not a per-frame value: O(100), and it
+        # does not track the pixel count.
+        assert 1.0 < r.method_param.kappa_fit < 1e3
+
+    @pytest.mark.parametrize("precision,work", [("single", np.float32),
+                                                ("fast", np.float32),
+                                                ("double", np.float64)])
+    def test_precision_presets(self, precision, work):
+        stack, truth = make_vp_stack()
+        cfg = PhaseConfig(method="vp_aia", gain_mode="joint", use_alpha=False,
+                          method_kwargs={"iters": 60, "tol": 1e-10, "crop": 10,
+                                         "basis_kwargs": {"degree": 1}})
+        r = PhaseSolver(cfg, precision=precision).fit(stack).result
+        assert r.phi.dtype == r.a.dtype == r.b.dtype == work
+        assert r.delta.dtype == r.g.dtype == np.float64
+        d = wrap(np.asarray(r.phi, dtype=float) - truth["phi"])
+        assert float(np.degrees(np.sqrt(np.mean((d - np.median(d)) ** 2)))) < 0.1
+
+
+def make_uniform_case(H=80, W=90, N=9, deg=1, seed=4, amp=0.01):
+    """A stack meeting the four conditions of `docs/vp_aia.md` Eq. (30).
+
+    Uniform steps with `N >= 5`, constant `g_n` and `b`, many fringes, and the
+    orthonormal modes `spatial_basis` already provides -- so Eq. (29) should
+    reduce to Eq. (30)'s `1 + J/K`.
+    """
+    rng = np.random.default_rng(seed)
+    K = H * W
+    yy, xx = np.mgrid[0:H, 0:W]
+    phi = np.angle(np.exp(1j * (0.9 * xx + 0.7 * yy)))
+    a, b = np.full((H, W), 100.0), np.full((H, W), 40.0)
+    delta = np.arange(N) * 2 * np.pi / N
+    g = np.ones(N)
+    basis = spatial_basis(H, W, "poly", np, degree=deg)
+    alpha = rng.standard_normal((N, basis.shape[0])) * amp * np.sqrt(K)
+    alpha -= alpha.mean(0)
+    Delta = (alpha @ basis).reshape(N, H, W)
+    stack = (a[None] + g[:, None, None] * b[None]
+             * np.cos(phi[None] + delta[:, None, None] + Delta))
+    return stack, phi, basis.shape[0], K
+
+
+class TestVPPhaseError:
+    """`docs/vp_aia.md` Eq. (29), VP-AIA's phase-error map."""
+
+    @staticmethod
+    def _fit(stack, deg, crop=5, precision="double"):
+        cfg = PhaseConfig(method="vp_aia", gain_mode="joint", use_alpha=False,
+                          method_kwargs={"iters": 80, "tol": 1e-12, "crop": crop,
+                                         "basis_kwargs": {"degree": deg}})
+        return PhaseSolver(cfg, precision=precision).fit(stack).result
+
+    def test_first_term_is_aia_eq26(self):
+        # docs/vp_aia.md §"Noise of the zeroth-order steps": "The first term of
+        # Eq. (29) is aia.md Eq. (26)". With no modes the two must agree
+        # exactly, which pins the s_n derivation.
+        stack, _, _, _ = make_uniform_case(H=60, W=70)
+        r = self._fit(stack, 1)
+        H, W = r.phi.shape
+        sigma0 = np.full((H, W), 0.5)
+        empty = spatial_basis(H, W, "poly", np, degree=0)
+        vp0 = vp_phi_error(r.b, r.phi, r.g * np.cos(r.delta), r.g * np.sin(r.delta),
+                           sigma0, False, r.method_param.beta_cov_unit, empty, np)
+        aia_var, _ = aia_phi_error_parts(r.b, r.phi, r.delta, r.g, True, sigma0, True, np)
+        assert np.max(np.abs(vp0 - np.sqrt(aia_var))) < 1e-12 * float(vp0.max())
+
+    def test_simplified_drops_the_correction(self):
+        stack, _, _, _ = make_uniform_case(H=60, W=70)
+        r = self._fit(stack, 2)
+        mp, (H, W) = r.method_param, r.phi.shape
+        sigma0 = np.full((H, W), 0.5)
+        full = mp.phi_error(r.b, r.phi, r.delta, r.g, True, sigma0, False, np)
+        simp = mp.phi_error(r.b, r.phi, r.delta, r.g, True, sigma0, True, np)
+        assert np.all(full >= simp - 1e-12)              # the correction adds variance
+        assert np.max(full - simp) > 0
+
+    def test_reduces_to_eq30_under_its_four_conditions(self):
+        # Uniform steps, constant g_n and b, many fringes, orthonormal modes:
+        # Eq. (29) must give Eq. (30)'s 1 + J/K.
+        for H, W, N, deg in ((80, 90, 9, 1), (80, 90, 9, 2), (120, 130, 13, 2)):
+            stack, _, J, K = make_uniform_case(H=H, W=W, N=N, deg=deg)
+            r = self._fit(stack, deg)
+            mp = r.method_param
+            sigma0 = np.full(r.phi.shape, 0.5)
+            full = mp.phi_error(r.b, r.phi, r.delta, r.g, True, sigma0, False, np)
+            simp = mp.phi_error(r.b, r.phi, r.delta, r.g, True, sigma0, True, np)
+            got = float((full ** 2 / simp ** 2 - 1).mean())
+            assert got == pytest.approx(J / K, rel=0.02), (got, J / K, H, W, N, deg)
+
+    def test_matches_a_monte_carlo_phase_variance(self):
+        # The map is a prediction about repeated noise realizations, so check
+        # it against one. 300 trials give a 4.1% standard error on a standard
+        # deviation, which is the tolerance below.
+        H, W, N, deg, trials, sigma0 = 40, 44, 9, 1, 300, 0.30
+        stack, phi_t, J, K = make_uniform_case(H=H, W=W, N=N, deg=deg)
+        rng = np.random.default_rng(7)
+        errs, preds = [], []
+        s0 = np.full((H, W), sigma0)
+        for _ in range(trials):
+            r = self._fit(stack + sigma0 * rng.standard_normal(stack.shape), deg, crop=4)
+            d = wrap(np.asarray(r.phi, dtype=float) - phi_t)
+            errs.append(wrap(d - np.median(d)))
+            preds.append(r.method_param.phi_error(r.b, r.phi, r.delta, r.g, True,
+                                                  s0, False, np))
+        c = (slice(4, -4), slice(4, -4))
+        emp = np.array(errs).std(axis=0, ddof=1)[c].mean()
+        pred = np.array(preds).mean(axis=0)[c].mean()
+        se = 1.0 / np.sqrt(2 * (trials - 1))
+        assert emp / pred == pytest.approx(1.0, abs=3 * se), (emp, pred)
+
+    def test_solver_reports_the_map(self):
+        stack, _, _, _ = make_uniform_case(H=60, W=70)
+        r = self._fit(stack, 1)
+        assert r.phi_error is not None and r.phi_error.shape == r.phi.shape
+        assert np.all(r.phi_error > 0)
+
+
+class TestVPRelinearization:
+    """`docs/vp_aia.md` Eq. (28), the relinearization loop."""
+
+    @staticmethod
+    def _solve(stack, rounds, round_tol=1e-12, deg=1):
+        cfg = PhaseConfig(method="vp_aia", gain_mode="joint", use_alpha=False,
+                          method_kwargs={"iters": 80, "tol": 1e-12, "crop": 4,
+                                         "basis_kwargs": {"degree": deg},
+                                         "rounds": rounds, "round_tol": round_tol})
+        return PhaseSolver(cfg, precision="double").fit(stack).result
+
+    def test_one_round_is_the_plain_first_order_pass(self):
+        stack, _, _, _ = make_uniform_case(H=50, W=56, N=9, amp=0.01)
+        cfg = PhaseConfig(method="vp_aia", gain_mode="joint", use_alpha=False,
+                          method_kwargs={"iters": 80, "tol": 1e-12, "crop": 4,
+                                         "basis_kwargs": {"degree": 1}})
+        default = PhaseSolver(cfg, precision="double").fit(stack).result
+        explicit = self._solve(stack, rounds=1)
+        assert default.method_param.rounds_run == 1
+        assert np.allclose(default.method_param.coeffs, explicit.method_param.coeffs,
+                           rtol=1e-12, atol=1e-14)
+
+    def test_extra_rounds_help_when_the_field_is_large(self):
+        # A single pass is first order in Delta_n, so a large field leaves a
+        # second-order error that Eq. (28) is there to remove.
+        stack, phi_t, _, _ = make_uniform_case(H=50, W=56, N=9, amp=0.12)
+        one = circ_rms_deg(self._solve(stack, 1).phi, phi_t)
+        many = circ_rms_deg(self._solve(stack, 5).phi, phi_t)
+        assert many < one / 10, (one, many)
+
+    def test_phase_error_falls_round_over_round(self):
+        stack, phi_t, _, _ = make_uniform_case(H=50, W=56, N=9, amp=0.12)
+        errs = [circ_rms_deg(self._solve(stack, r).phi, phi_t) for r in (1, 2, 3, 4)]
+        assert all(b < a for a, b in zip(errs, errs[1:])), errs
+
+    def test_round_tol_stops_early(self):
+        # A field the first pass already resolves: the second round's increment
+        # falls under round_tol and the loop stops rather than spending its
+        # budget.
+        stack, _, _, _ = make_uniform_case(H=50, W=56, N=9, amp=0.005)
+        r = self._solve(stack, rounds=6, round_tol=1e-4)
+        assert r.method_param.rounds_run < 6
+        assert len(r.method_param.increment_rms) == r.method_param.rounds_run
+        assert r.method_param.increment_rms[-1] < 1e-4
+
+    def test_accumulated_field_keeps_both_zero_means(self):
+        # "The increments have zero spatial and frame means, so the accumulated
+        # Delta_n keeps both conventions."
+        stack, _, _, _ = make_uniform_case(H=50, W=56, N=9, amp=0.12, deg=2)
+        mp = self._solve(stack, rounds=4, deg=2).method_param
+        assert mp.rounds_run == 4
+        assert np.max(np.abs(mp.coeffs.mean(axis=1))) < 1e-9 * np.abs(mp.coeffs).max()
+
+    def test_bad_round_arguments_raise(self):
+        stack, _, _, _ = make_uniform_case(H=50, W=56, N=9)
+        with pytest.raises(ValueError, match="rounds must be at least 1"):
+            self._solve(stack, rounds=0)
+        with pytest.raises(ValueError, match="round_tol must be non-negative"):
+            self._solve(stack, rounds=2, round_tol=-1.0)

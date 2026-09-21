@@ -153,3 +153,89 @@ def center_coeffs(coeffs: np.ndarray) -> np.ndarray:
     np.ndarray, shape (J, N)
     """
     return coeffs - coeffs.mean(axis=1, keepdims=True)
+
+
+def normalize_quadrature_frame(a: np.ndarray, u: np.ndarray, v: np.ndarray,
+                               P_n: np.ndarray, Q_n: np.ndarray, xp: ModuleType,
+                               precision: str | Precision | None = None
+                               ) -> tuple[np.ndarray, np.ndarray, np.ndarray,
+                                          np.ndarray, np.ndarray]:
+    """Put a quadrature solution into the conventional frame.
+
+    Applies ``docs/vp_aia.md`` §"Normalization" steps 1-4 in order -- shift,
+    whitening, phase origin, contrast scale -- each preserving the conditions
+    the previous ones established. Afterwards the four conditions of
+    §"Quadrature frame" hold, together with ``delta[0] = 0`` and
+    ``median(g) = 1``::
+
+        sum((a - mean(a)) * u) == sum((a - mean(a)) * v) == 0
+        sum(u**2) == sum(v**2),  sum(u*v) == 0
+
+    Every step is a reparametrization of ``docs/vp_aia.md`` Eq. (5), so
+    ``a + P_n u + Q_n v`` is unchanged.
+
+    Parameters
+    ----------
+    a, u, v : np.ndarray, shape (P,)
+        Background and quadrature fields, flattened.
+    P_n, Q_n : np.ndarray, shape (N,)
+        Per-frame quadrature coefficients, ``docs/vp_aia.md`` Eq. (5):
+        ``P_n = g_n cos(delta_n)``, ``Q_n = g_n sin(delta_n)``.
+    xp : module
+        ``numpy`` or ``cupy``, matching the inputs.
+    precision : str or Precision, optional
+        Dtypes to run in; see :class:`phase_shift.backend.Precision`. The
+        pixel sums accumulate in ``precision.accum``; the 2x2 solves are
+        float64.
+
+    Returns
+    -------
+    a, u, v : np.ndarray, shape (P,)
+        Normalized fields, in the input dtype.
+    P_n, Q_n : np.ndarray, shape (N,), float64
+        Normalized per-frame coefficients.
+    """
+    acc = Precision.of(precision).accum
+    eps = np.finfo(float).eps
+    P = u.shape[0]
+    P_n = xp.asarray(P_n, dtype=xp.float64)
+    Q_n = xp.asarray(Q_n, dtype=xp.float64)
+
+    # Step 1, shift: move the part of a that correlates with the quadratures
+    # into (P_n, Q_n). Raw moments, so no centered (P,)-sized copy is made.
+    Su = float(xp.sum(u, dtype=acc))
+    Sv = float(xp.sum(v, dtype=acc))
+    Sa = float(xp.sum(a, dtype=acc))
+    Suu = float(xp.sum(u * u, dtype=acc))
+    Svv = float(xp.sum(v * v, dtype=acc))
+    Suv = float(xp.sum(u * v, dtype=acc))
+    Sau = float(xp.sum(a * u, dtype=acc))
+    Sav = float(xp.sum(a * v, dtype=acc))
+    Cuv = Suv - Su * Sv / P
+    C = np.array([[Suu - Su * Su / P, Cuv], [Cuv, Svv - Sv * Sv / P]])
+    rhs = np.array([Sau - Sa * Su / P, Sav - Sa * Sv / P])
+    p, q = (np.linalg.pinv(C) @ rhs).tolist()
+    a = a - p * u - q * v
+    P_n = P_n + p
+    Q_n = Q_n + q
+
+    # Step 2, whitening: T on (u, v), its inverse on (P_n, Q_n), which leaves
+    # the model unchanged (docs/vp_aia.md §"Quadrature frame").
+    T = whitening_matrix(u, v, xp, precision)
+    Ti = np.linalg.inv(T)
+    u, v = (u * float(T[0, 0]) + v * float(T[0, 1]),
+            u * float(T[1, 0]) + v * float(T[1, 1]))
+    P_n, Q_n = (P_n * float(Ti[0, 0]) + Q_n * float(Ti[1, 0]),
+                P_n * float(Ti[0, 1]) + Q_n * float(Ti[1, 1]))
+
+    # Step 3, phase origin: one rotation applied to both pairs.
+    d0 = float(xp.arctan2(Q_n[0], P_n[0]))
+    # Python floats, not NumPy scalars: a np.float64 scalar is not weak under
+    # NEP 50 and would promote the working-dtype fields.
+    c, s = float(np.cos(d0)), float(np.sin(d0))
+    P_n, Q_n = P_n * c + Q_n * s, -P_n * s + Q_n * c
+    u, v = u * c + v * s, -u * s + v * c
+
+    # Step 4, contrast scale: median(g) = 1.
+    scale = max(float(xp.median(xp.sqrt(P_n * P_n + Q_n * Q_n))), eps)
+    return a, u * scale, v * scale, P_n / scale, Q_n / scale

@@ -14,7 +14,6 @@ import numpy as np
 
 from ..backend import Precision, get_array_module
 from ..basis import spatial_basis
-from ..errors import step_field_phi_error
 from ..utils import format_value
 from .base import MethodParam
 from .diagnostics import AIAParam
@@ -150,10 +149,9 @@ class StepFieldParam(MethodParam):
     coeffs_rms : np.ndarray, shape (J,)
         RMS of each row of ``coeffs`` across frames.
     kappa_fit : float
-        Largest per-frame condition number of the coefficient fit,
-        ``docs/sf_aia.md`` Eq. (E3). Large values mean the basis has outrun
-        what the fringe pattern resolves, however good the fit's own score
-        looks; see §"Conditioning".
+        Condition number of the coefficient fit; each method documents which
+        system it measures. Large values mean the basis has outrun what the
+        fringe pattern resolves, however good the fit's own score looks.
     precision : Precision
         Dtypes the solve ran in, carried so :meth:`phase_step_field` rebuilds
         the step field the way :func:`step_field_quality` scored it.
@@ -166,26 +164,6 @@ class StepFieldParam(MethodParam):
     coeffs_rms: np.ndarray
     kappa_fit: float
     precision: Precision
-
-    def phi_error(self, b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: np.ndarray,
-                  fit_gain: bool, noise_std: np.ndarray, simplified: bool,
-                  xp: ModuleType) -> np.ndarray:
-        """Return ``sigma_Phi`` including the step field's own contribution.
-
-        ``docs/sf_aia.md`` §"Noise of the corrected solve", on top of the AIA
-        map. See :meth:`phase_shift.methods.base.MethodParam.phi_error` for
-        the arguments.
-
-        Returns
-        -------
-        np.ndarray, shape (H, W)
-            Per-pixel phase standard deviation, in radians.
-        """
-        H, W = phi.shape
-        basis = spatial_basis(H, W, self.basis, xp, precision=self.precision,
-                              **self.basis_kwargs)
-        return step_field_phi_error(b, phi, delta, g, fit_gain, noise_std, simplified,
-                                    basis, xp, precision=self.precision)
 
     def print_summary(self) -> None:
         """Print the AIA diagnostics, then the step-field ones."""

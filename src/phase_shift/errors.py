@@ -170,6 +170,34 @@ def aia_phi_error_parts(b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: np
     return unit_var * sigma0_sq + correction / b2, k
 
 
+def _mode_quadratic_form(t: np.ndarray, basis_block: np.ndarray, weight: np.ndarray,
+                         xp: ModuleType) -> np.ndarray:
+    """Per-pixel ``z' W z`` with ``z_(n,j) = t_n H_j``, on one pixel block.
+
+    The quadratic form both step-field error models reduce to: ``docs/sf_aia.md``
+    Eq. (E7) and ``docs/vp_aia.md`` Eq. (29) differ in what ``t_n`` and ``W``
+    are, not in this contraction.
+
+    Parameters
+    ----------
+    t : np.ndarray, shape (N, C)
+        Per-frame, per-pixel weight of the block.
+    basis_block : np.ndarray, shape (J, C)
+        The modes on the same pixels.
+    weight : np.ndarray, shape (N*J, N*J)
+        ``W``, indexed ``n*J + j``.
+    xp : module
+
+    Returns
+    -------
+    np.ndarray, shape (C,)
+    """
+    N, C = t.shape
+    J = basis_block.shape[0]
+    z = (t[:, None, :] * basis_block[None, :, :]).reshape(N * J, C)
+    return xp.sum(z * (weight @ z), axis=0)
+
+
 def _step_field_sensitivity(u: np.ndarray, v: np.ndarray, P_n: np.ndarray,
                             Q_n: np.ndarray, sl: slice) -> np.ndarray:
     """``docs/sf_aia.md`` Eq. (T7)'s ``w_n = u Q_n - v P_n`` on one pixel block.
@@ -298,7 +326,99 @@ def step_field_phi_error(b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
         s_n = (k_a[0][:, None] * v[None, sl] - k_a[1][:, None] * u[None, sl]) / b2[None, :]
         t = s_n * w_field                                                 # (N, C)
         t = t - xp.mean(t, axis=0, keepdims=True)
-        z = (t[:, None, :] * basis[None, :, sl]).reshape(N * J, -1)
-        extra[sl] = xp.sum(z * (weight @ z), axis=0)
+        extra[sl] = _mode_quadratic_form(t, basis[:, sl], weight, xp)
 
     return xp.sqrt(xp.maximum(phi_var + extra.reshape(H, W).astype(b.dtype), 0))
+
+
+def vp_phi_error(b: np.ndarray, phi: np.ndarray, P_n: np.ndarray, Q_n: np.ndarray,
+                 sigma0: np.ndarray, simplified: bool, beta_cov_unit: np.ndarray,
+                 basis: np.ndarray, xp: ModuleType, chunk: int = 65_536,
+                 precision: "str | Precision | None" = None) -> np.ndarray:
+    """VP-AIA's phase-error map, ``docs/vp_aia.md`` Eq. (29).
+
+    The pixel-step variance ``sigma_0^2 sum_n s_n^2`` plus the variance the
+    fitted step field adds, §"Effect on the phase". The second term is the
+    quadratic form of Eq. (29) in the coefficient block of the fitted
+    covariance; its ``gamma`` is zero at the positions of ``P_n^(1)`` and
+    ``Q_n^(1)``, so only that block is touched.
+
+    Parameters
+    ----------
+    b, phi : np.ndarray, shape (H, W)
+        Fitted fringe amplitude and phase in radians.
+    P_n, Q_n : np.ndarray, shape (N,)
+        Fitted per-frame coefficients, ``docs/vp_aia.md`` Eq. (5).
+    sigma0 : np.ndarray, shape (H, W), or float
+        Per-pixel noise standard deviation, ``docs/aia.md`` Eq. (32).
+    simplified : bool
+        Return the pixel-step term alone, dropping the ``O(J/K)`` correction
+        of Eq. (30).
+    beta_cov_unit : np.ndarray, shape (2N+NJ, 2N+NJ)
+        Covariance of the fitted unknowns per unit ``sigma_0^2``, from
+        :class:`phase_shift.methods.vp_system.VPSolution`.
+    basis : np.ndarray, shape (J, P)
+        The modes ``H_j`` the coefficients were fitted on.
+    xp : module
+    chunk : int, default 65536
+        Pixels reduced per block; bounds memory, not the result.
+    precision : str or Precision, optional
+        Dtypes to run in; see :class:`phase_shift.backend.Precision`.
+
+    Notes
+    -----
+    ``beta_cov_unit`` is derived for noise of one variance across the field,
+    so a spatially varying ``sigma0`` scales the second term pixel by pixel
+    rather than re-weighting the fit. §"Noise of the zeroth-order steps"
+    leaves the cross-correlation with the zeroth-order step noise underived;
+    the two terms are added, as in ``docs/sf_aia.md`` Eq. (E9).
+
+    Returns
+    -------
+    np.ndarray, shape (H, W)
+        ``sigma_Phi(x, y)``, in radians, in ``b``'s dtype.
+    """
+    acc = Precision.of(precision).accum
+    H, W = phi.shape
+    N = P_n.shape[0]
+    P_n = xp.asarray(P_n, dtype=xp.float64)
+    Q_n = xp.asarray(Q_n, dtype=xp.float64)
+
+    A = xp.stack([xp.ones(N, dtype=xp.float64), P_n, Q_n], axis=1)        # (N, 3)
+    A_p_inv = xp.linalg.pinv(A.T @ A)                                     # (3, 3), Eq. (7)
+    e1 = A @ A_p_inv[:, 1]                                                # (N,)
+    e2 = A @ A_p_inv[:, 2]
+
+    b_a = xp.asarray(b, dtype=acc).reshape(-1)                            # (P,)
+    phi_a = xp.asarray(phi, dtype=acc).reshape(-1)
+    u = b_a * xp.cos(phi_a)                                               # (P,), Eq. (2)
+    v = -b_a * xp.sin(phi_a)
+    del b_a, phi_a
+    floor = float(xp.finfo(xp.float64).eps)
+    b2 = xp.maximum(u * u + v * v, floor)                                 # (P,)
+    sigma0_sq = xp.asarray(sigma0, dtype=acc).reshape(-1) ** 2
+
+    # sum_n s_n^2 in closed form: s_n = (e1_n v - e2_n u) / b^2, so the frame
+    # sum collapses onto three scalars and no (N, P) array is built.
+    S11 = float(xp.sum(e1 * e1))
+    S12 = float(xp.sum(e1 * e2))
+    S22 = float(xp.sum(e2 * e2))
+    phi_var = sigma0_sq * (S11 * v * v - 2 * S12 * u * v + S22 * u * u) / (b2 * b2)
+    if simplified or basis.shape[0] == 0:
+        return xp.sqrt(phi_var).reshape(H, W).astype(b.dtype, copy=False)
+
+    J = basis.shape[0]
+    weight = xp.asarray(beta_cov_unit[2 * N:, 2 * N:], dtype=acc)         # (NJ, NJ)
+    e1_a, e2_a = e1.astype(acc), e2.astype(acc)
+    P_a, Q_a = P_n.astype(acc), Q_n.astype(acc)
+    P_tot = u.shape[0]
+    extra = xp.empty(P_tot, dtype=acc)
+    for start in range(0, P_tot, chunk):
+        sl = slice(start, min(start + chunk, P_tot))
+        # t_n = s_n w_n, with w_n = P_n v - Q_n u of Eq. (17).
+        s_n = (e1_a[:, None] * v[None, sl] - e2_a[:, None] * u[None, sl]) / b2[None, sl]
+        w_n = P_a[:, None] * v[None, sl] - Q_a[:, None] * u[None, sl]
+        extra[sl] = _mode_quadratic_form(s_n * w_n, basis[:, sl], weight, xp)
+
+    return xp.sqrt(xp.maximum(phi_var + sigma0_sq * extra, 0)) \
+        .reshape(H, W).astype(b.dtype, copy=False)

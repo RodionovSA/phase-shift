@@ -30,6 +30,16 @@ known.
       implemented by `aia_step_field`, refining that solve against a
       spatially-varying phase-step error expanded on a basis
       (`basis_kwargs={"degree": 1}`, the default, is a pure linear tilt).
+    - `vp_aia.py` — Variable-Projection AIA, registered as `"vp_aia"` and
+      implemented by `aia_variable_projection`: the same correction as a
+      first-order fit in one pass, without SF-AIA's refinement loop or its
+      attenuation bias. `rounds > 1` re-linearizes for a step field too large
+      for one pass.
+    - `vp_system.py` — the constrained normal system that fit solves,
+      `fit_frame_and_coeffs`; its size is `2N + NJ` and does not grow with
+      the pixel count.
+    - `step_field.py` — `StepFieldParam` and `step_field_quality`, shared by
+      any method that expands the step field on a basis.
     - `base.py` — `MethodParam`, the diagnostics interface every method
       returns.
     - `steps.py` — `pixel_step`/`frame_step`, the two alternating
@@ -40,10 +50,11 @@ known.
       diagnostics it reports.
   - `basis.py` — `spatial_basis`, `BASES`: the spatial basis families a
     phase-step error field is expanded on, each centered and orthonormalized
-    to the conventions of `docs/sf_aia.md`.
+    to the conventions of `docs/sf_aia.md`, and serving as `docs/vp_aia.md`
+    Eq. (13)'s modes `H_j`.
   - `errors.py` — the phase-error derivations of `docs/aia.md`
-    §"Phase-error covariance" and `docs/sf_aia.md`, shared by the methods'
-    `phi_error` maps.
+    §"Phase-error covariance", `docs/sf_aia.md` and `docs/vp_aia.md` Eq. (29),
+    shared by the methods' `phi_error` maps.
   - `frame_contrast.py` — `measure_frame_contrast`/`measure_frame_visibility`,
     per-frame fringe gain and visibility estimated from the spatial carrier.
   - `carrier.py` — `remove_carrier`, estimating/removing a spatial
@@ -63,7 +74,7 @@ known.
 - `docs/sf_aia.md` — Spatial-Field AIA (SF-AIA), the method that uses AIA
   to recover spatially varying phase-step errors; backs `methods/sf_aia.py`.
 - `docs/vp_aia.md` — Variable-Projection AIA, the same correction in one
-  pass; theory only, not yet implemented.
+  pass; backs `methods/vp_aia.py` and `methods/vp_system.py`.
 - `docs/gauge_conventions.md` — which convention pins each exact ambiguity
   of the model, and where in the code it is applied.
 - `docs/AGENTS.md` — how the theory documents relate and which are settled.
@@ -129,19 +140,23 @@ diagnostics from Chen & Kemao 2019: large values flag a poorly conditioned
 acquisition whose result shouldn't be trusted, even if `converged` is
 `True`), `predicted_rms` (the paper's predicted phase error in radians),
 `iters_run`, `converged`, and (when `gain_mode="joint"`) `g_fit`/`c_fit`/
-`g_min_ratio` describing the joint-gain fit. For `"sf_aia"`, an
-`SFAIAParam` — a `StepFieldParam`, the shared base for any method that
-recovers a step field — wrapping that `AIAParam` alongside the step field
-itself: `basis`/`basis_kwargs` naming the family it was expanded on, `coeffs`
-(shape `(J, N)`, not gauge-fixed — subtract the frame mean before reading a
-row as per-frame drift) and `coeffs_rms`, `kappa_fit` flagging a basis that
-has outrun what the fringe pattern resolves, and `rms_frac`,
-`rms_frac_history`, `best_iter`, `refine_iters_run`, `refine_converged`
-describing the refinement loop. Every method also reports a per-pixel
+`g_min_ratio` describing the joint-gain fit. The two step-field methods share
+a `StepFieldParam` base wrapping that `AIAParam`: `basis`/`basis_kwargs`
+naming the family the field was expanded on, `coeffs` (shape `(J, N)`, not
+gauge-fixed — subtract the frame mean before reading a row as per-frame
+drift) and `coeffs_rms`, and `kappa_fit` flagging a basis that has outrun
+what the fringe pattern resolves. On top of that, `"sf_aia"` returns an
+`SFAIAParam` with `rms_frac`, `rms_frac_history`, `best_iter`,
+`refine_iters_run` and `refine_converged` describing the refinement loop;
+`"vp_aia"` returns a `VPAIAParam` with the first-order frame corrections
+`P_corr`/`Q_corr`, the fitted covariance `beta_cov_unit`, `rms_frac`, and
+`rounds_run`/`increment_rms` describing the relinearization. Every method also
+reports a per-pixel
 `solver.result.phi_error` map in radians, from `docs/aia.md`
 §"Phase-error covariance". See `src/phase_shift/config.py`,
-`src/phase_shift/result.py`, `src/phase_shift/methods/aia.py`, and
-`src/phase_shift/methods/sf_aia.py` for full parameter/field documentation.
+`src/phase_shift/result.py`, `src/phase_shift/methods/aia.py`,
+`src/phase_shift/methods/sf_aia.py`, and `src/phase_shift/methods/vp_aia.py`
+for full parameter/field documentation.
 
 ## GPU (CuPy)
 

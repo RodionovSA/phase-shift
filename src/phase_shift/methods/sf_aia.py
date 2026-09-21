@@ -10,11 +10,13 @@ see §"Algorithm".
 """
 
 from dataclasses import dataclass
+from types import ModuleType
 
 import numpy as np
 
 from ..backend import Precision, get_array_module
 from ..basis import BASES, spatial_basis
+from ..errors import step_field_phi_error
 from ..utils import format_value
 from .aia import aia
 from .diagnostics import aia_diagnostics, cond2
@@ -160,6 +162,26 @@ class SFAIAParam(StepFieldParam):
     refine_iters_run: int
     refine_converged: bool
     best_iter: int
+
+    def phi_error(self, b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: np.ndarray,
+                  fit_gain: bool, noise_std: np.ndarray, simplified: bool,
+                  xp: ModuleType) -> np.ndarray:
+        """Return ``sigma_Phi`` including the step field's own contribution.
+
+        ``docs/sf_aia.md`` §"Noise of the corrected solve", on top of the AIA
+        map. See :meth:`phase_shift.methods.base.MethodParam.phi_error` for
+        the arguments.
+
+        Returns
+        -------
+        np.ndarray, shape (H, W)
+            Per-pixel phase standard deviation, in radians.
+        """
+        H, W = phi.shape
+        basis = spatial_basis(H, W, self.basis, xp, precision=self.precision,
+                              **self.basis_kwargs)
+        return step_field_phi_error(b, phi, delta, g, fit_gain, noise_std, simplified,
+                                    basis, xp, precision=self.precision)
 
     def print_summary(self) -> None:
         """Print the shared step-field diagnostics, then the refinement ones."""
