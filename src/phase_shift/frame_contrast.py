@@ -4,14 +4,14 @@
 import warnings
 
 import numpy as np
-from numpy.typing import DTypeLike
 
-from .backend import default_dtype, get_array_module
+from .backend import Precision, get_array_module
 
 
 def _carrier_dc_amplitudes(stack: np.ndarray, dc_radius: int = 8,
                            halfwin: tuple[int, int] = (3, 4), frame_chunk: int = 8,
-                           dtype: DTypeLike = None) -> tuple[np.ndarray, np.ndarray]:
+                           precision: str | Precision | None = None
+                           ) -> tuple[np.ndarray, np.ndarray]:
     """Return each frame's carrier-peak and DC amplitudes from its 2-D spectrum.
 
     The carrier peak is located once, in the frame-summed Hann-windowed
@@ -30,9 +30,9 @@ def _carrier_dc_amplitudes(stack: np.ndarray, dc_radius: int = 8,
         the peak.
     frame_chunk : int, default 8
         Number of frames transformed at once; bounds memory, not the result.
-    dtype : dtype, optional
-        Working dtype for the FFT input. Defaults to
-        :func:`phase_shift.backend.default_dtype`.
+    precision : str or Precision, optional
+        Dtypes to run in; see :class:`phase_shift.backend.Precision`. Its
+        ``work`` is the dtype of the FFT input.
 
     Returns
     -------
@@ -46,7 +46,7 @@ def _carrier_dc_amplitudes(stack: np.ndarray, dc_radius: int = 8,
         amplitudes unreliable.
     """
     xp = get_array_module(stack)
-    work_dtype = dtype if dtype is not None else default_dtype(xp)
+    work_dtype = Precision.of(precision).work
     N, H, W = stack.shape
     win = (xp.outer(xp.hanning(H), xp.hanning(W)) if H > 1 and W > 1
            else xp.ones((H, W))).astype(work_dtype)
@@ -90,7 +90,7 @@ def _carrier_dc_amplitudes(stack: np.ndarray, dc_radius: int = 8,
 
 def measure_frame_contrast(stack: np.ndarray, dc_radius: int = 8,
                            halfwin: tuple[int, int] = (3, 4), frame_chunk: int = 8,
-                           dtype: DTypeLike = None) -> np.ndarray:
+                           precision: str | Precision | None = None) -> np.ndarray:
     """Measure each frame's fringe gain ``g_n`` from its spatial carrier.
 
     ``g_n`` is defined in ``docs/interference_model.md`` Eq. (17). Requires a
@@ -109,9 +109,9 @@ def measure_frame_contrast(stack: np.ndarray, dc_radius: int = 8,
         the peak.
     frame_chunk : int, default 8
         Number of frames transformed at once; bounds memory, not the result.
-    dtype : dtype, optional
-        Working dtype for the FFT input. Defaults to
-        :func:`phase_shift.backend.default_dtype`.
+    precision : str or Precision, optional
+        Dtypes to run in; see :class:`phase_shift.backend.Precision`. Its
+        ``work`` is the dtype of the FFT input.
 
     Returns
     -------
@@ -124,13 +124,13 @@ def measure_frame_contrast(stack: np.ndarray, dc_radius: int = 8,
         If the carrier peak lies on the ``dc_radius`` boundary.
     """
     xp = get_array_module(stack)
-    amp, _ = _carrier_dc_amplitudes(stack, dc_radius, halfwin, frame_chunk, dtype)
+    amp, _ = _carrier_dc_amplitudes(stack, dc_radius, halfwin, frame_chunk, precision)
     return amp / xp.median(amp)
 
 
 def measure_frame_visibility(stack: np.ndarray, dc_radius: int = 8,
                              halfwin: tuple[int, int] = (3, 4), frame_chunk: int = 8,
-                             dtype: DTypeLike = None) -> np.ndarray:
+                             precision: str | Precision | None = None) -> np.ndarray:
     """Measure each frame's fringe visibility from its spatial carrier.
 
     Returns ``2 * carrier_amp / dc_amp``, proportional to the visibility
@@ -151,9 +151,9 @@ def measure_frame_visibility(stack: np.ndarray, dc_radius: int = 8,
         the peak.
     frame_chunk : int, default 8
         Number of frames transformed at once; bounds memory, not the result.
-    dtype : dtype, optional
-        Working dtype for the FFT input. Defaults to
-        :func:`phase_shift.backend.default_dtype`.
+    precision : str or Precision, optional
+        Dtypes to run in; see :class:`phase_shift.backend.Precision`. Its
+        ``work`` is the dtype of the FFT input.
 
     Returns
     -------
@@ -166,7 +166,7 @@ def measure_frame_visibility(stack: np.ndarray, dc_radius: int = 8,
         If the carrier peak lies on the ``dc_radius`` boundary.
     """
     xp = get_array_module(stack)
-    amp, dc_amp = _carrier_dc_amplitudes(stack, dc_radius, halfwin, frame_chunk, dtype)
+    amp, dc_amp = _carrier_dc_amplitudes(stack, dc_radius, halfwin, frame_chunk, precision)
     dc_amp = xp.where(dc_amp > 0, dc_amp, xp.asarray(xp.finfo(xp.float64).eps))
     return 2.0 * amp / dc_amp
 

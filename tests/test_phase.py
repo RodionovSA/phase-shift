@@ -17,7 +17,7 @@ from phase_shift import (
     remove_carrier,
     subtract_reference,
 )
-from phase_shift.backend import CUPY_AVAILABLE
+from phase_shift.backend import CUPY_AVAILABLE, Precision, get_precision, set_precision
 from phase_shift.basis import BASES, spatial_basis
 from phase_shift.methods import MethodParam
 from phase_shift.methods.gauge import (center_coeffs, center_offsets, normalize_gain,
@@ -117,14 +117,61 @@ class TestPhaseConfig:
     def test_yaml_roundtrip(self, tmp_path):
         p = tmp_path / "config.yaml"
         cfg = PhaseConfig(use_alpha=False, gain_mode="none", method="sf_aia",
-                           method_kwargs={"iters": 5}, precise_reduce=False)
+                           method_kwargs={"iters": 5})
         cfg.to_yaml(p)
         cfg2 = PhaseConfig.from_yaml(p)
         assert cfg2.use_alpha is False
         assert cfg2.gain_mode == "none"
         assert cfg2.method == "sf_aia"
         assert cfg2.method_kwargs == {"iters": 5}
-        assert cfg2.precise_reduce is False
+
+
+class TestPrecision:
+    def test_presets(self):
+        assert Precision.of("single") == Precision(np.float32, np.float64)
+        assert Precision.of("double") == Precision(np.float64, np.float64)
+        assert Precision.of("fast") == Precision(np.float32, np.float32)
+
+    def test_unknown_preset_raises(self):
+        with pytest.raises(ValueError):
+            Precision.of("half")
+
+    def test_default_is_single(self):
+        assert get_precision() == Precision.of("single")
+
+    def test_set_precision_applies_to_new_solvers_only(self):
+        stack, truth = make_stack()
+        solver_before = PhaseSolver(PhaseConfig(gain_mode="none"))
+        try:
+            set_precision("double")
+            assert get_precision() == Precision.of("double")
+            # Resolved at construction, so the earlier solver is unaffected.
+            assert solver_before.precision == Precision.of("single")
+            assert PhaseSolver(PhaseConfig()).precision == Precision.of("double")
+            assert solver_before.fit(stack).result.phi.dtype == np.float32
+        finally:
+            set_precision("single")
+
+    def test_result_records_precision_and_field_dtypes(self):
+        stack, truth = make_stack()
+        for name, work in (("single", np.float32), ("double", np.float64),
+                           ("fast", np.float32)):
+            for method in ("aia", "sf_aia"):
+                kw = {"iters": 10} if method == "aia" else {"iters": 10, "crop": 5}
+                cfg = PhaseConfig(method=method, gain_mode="none", method_kwargs=kw)
+                r = PhaseSolver(cfg, precision=name).fit(stack).result
+                assert r.precision == Precision.of(name)
+                assert r.phi.dtype == r.a.dtype == r.b.dtype == work
+                assert r.phi_error.dtype == work
+                # (N,) vectors stay float64 whatever the precision.
+                assert r.delta.dtype == r.g.dtype == r.alpha.dtype == np.float64
+
+    def test_explicit_precision_instance_accepted(self):
+        stack, truth = make_stack()
+        p = Precision(np.float64, np.float64)
+        r = PhaseSolver(PhaseConfig(gain_mode="none"), precision=p).fit(stack).result
+        assert r.precision == p
+        assert r.phi.dtype == np.float64
 
 
 class TestAIA:
@@ -141,31 +188,30 @@ class TestAIA:
         err_flip = circ_rms_deg(solver.result.phi, -truth["phi"])
         assert min(err_same, err_flip) < 0.5
 
-    def test_dtype_float32_close_to_float64(self):
+    def test_single_close_to_double(self):
         stack, truth = make_stack()
-        # gain_mode="none" (fixed g=1) isolates dtype effects in the solve itself
-        # from any dtype-dependent variation in gain estimation.
+        # gain_mode="none" (fixed g=1) isolates precision effects in the solve
+        # itself from any precision-dependent variation in gain estimation.
         config = PhaseConfig(gain_mode="none")
-        r64 = PhaseSolver(config, dtype=np.float64).fit(stack)
-        r32 = PhaseSolver(config, dtype=np.float32).fit(stack)
+        r64 = PhaseSolver(config, precision="double").fit(stack)
+        r32 = PhaseSolver(config, precision="single").fit(stack)
         assert circ_rms_deg(r32.result.phi, r64.result.phi) < 1e-2
         assert r32.result.method_param.iters_run == r64.result.method_param.iters_run
         assert r32.result.method_param.converged == r64.result.method_param.converged
 
-    def test_precise_reduce_false_close_to_true(self):
-        # precise_reduce only changes which dtype frame_step's
-        # stack-scale reduction runs in (src/phase_shift/methods/aia.py) -- the
-        # recovered phase should be indistinguishable at the same threshold
-        # test_dtype_float32_close_to_float64 already uses for a genuine
-        # dtype change.
+    def test_fast_close_to_single(self):
+        # "fast" differs from "single" only in the dtype frame_step's
+        # stack-scale reduction runs in (src/phase_shift/methods/steps.py) --
+        # the recovered phase should be indistinguishable at the same
+        # threshold test_single_close_to_double uses for a genuine work-dtype
+        # change.
         stack, truth = make_stack()
-        cfg_precise = PhaseConfig(gain_mode="none", precise_reduce=True)
-        cfg_fast = PhaseConfig(gain_mode="none", precise_reduce=False)
-        r_precise = PhaseSolver(cfg_precise).fit(stack)
-        r_fast = PhaseSolver(cfg_fast).fit(stack)
-        assert circ_rms_deg(r_fast.result.phi, r_precise.result.phi) < 1e-2
-        assert r_fast.result.method_param.iters_run == r_precise.result.method_param.iters_run
-        assert r_fast.result.method_param.converged == r_precise.result.method_param.converged
+        config = PhaseConfig(gain_mode="none")
+        r_single = PhaseSolver(config, precision="single").fit(stack)
+        r_fast = PhaseSolver(config, precision="fast").fit(stack)
+        assert circ_rms_deg(r_fast.result.phi, r_single.result.phi) < 1e-2
+        assert r_fast.result.method_param.iters_run == r_single.result.method_param.iters_run
+        assert r_fast.result.method_param.converged == r_single.result.method_param.converged
 
     def test_gain_auto_matches_supplied_gain_ranking(self):
         stack, truth = make_stack(seed=1)
@@ -321,36 +367,31 @@ class TestStepField:
         assert mp.refine_iters_run == 0
         assert mp.best_iter == -1
 
-    def test_precise_reduce_false_close_to_true(self):
+    def test_fast_close_to_single(self):
         # Same equivalence check as TestAIA's, for sf_aia's own
         # stack-scale reductions (frame_step inside the refine loop,
         # step_field_quality's model/resid reconstruction, and its RMS
         # ratio -- all in src/phase_shift/methods/sf_aia.py).
         stack, truth = make_step_field_stack(kind="linear", gain_std=0.3)
         kw = dict(iters=40, tol=1e-6, basis_kwargs=dict(degree=1), refine_iters=8, refine_tol=1e-8, crop=5)
-        cfg_precise = PhaseConfig(use_alpha=False, gain_mode="joint", method="sf_aia",
-                                   method_kwargs=kw, precise_reduce=True)
-        cfg_fast = PhaseConfig(use_alpha=False, gain_mode="joint", method="sf_aia",
-                                method_kwargs=kw, precise_reduce=False)
-        r_precise = PhaseSolver(cfg_precise).fit(stack).result
-        r_fast = PhaseSolver(cfg_fast).fit(stack).result
-        assert circ_rms_deg(r_fast.phi, r_precise.phi) < 1e-2
-        assert r_fast.method_param.rms_frac == pytest.approx(r_precise.method_param.rms_frac, abs=1e-4)
-        assert np.allclose(r_fast.method_param.coeffs, r_precise.method_param.coeffs, atol=1e-3)
-        # method_param carries the setting it was solved with, so
+        cfg = PhaseConfig(use_alpha=False, gain_mode="joint", method="sf_aia",
+                          method_kwargs=kw)
+        r_single = PhaseSolver(cfg, precision="single").fit(stack).result
+        r_fast = PhaseSolver(cfg, precision="fast").fit(stack).result
+        assert circ_rms_deg(r_fast.phi, r_single.phi) < 1e-2
+        assert r_fast.method_param.rms_frac == pytest.approx(r_single.method_param.rms_frac, abs=1e-4)
+        assert np.allclose(r_fast.method_param.coeffs, r_single.method_param.coeffs, atol=1e-3)
+        # method_param carries the precision it was solved with, so
         # phase_step_field (called generically by PhaseSolver.fit's
-        # reconstruction-error check) can honor it too.
-        assert r_precise.method_param.precise_reduce is True
-        assert r_fast.method_param.precise_reduce is False
-        assert r_precise.method_param.work_dtype == r_fast.method_param.work_dtype == np.float32
-        assert r_fast.reconstruction_error == pytest.approx(r_precise.reconstruction_error, abs=1e-4)
+        # reconstruction-error check) rebuilds the field the same way.
+        assert r_single.method_param.precision == Precision.of("single")
+        assert r_fast.method_param.precision == Precision.of("fast")
+        assert r_fast.reconstruction_error == pytest.approx(r_single.reconstruction_error, abs=1e-4)
 
-    def test_step_field_quality_resid_dtype_matches_precise_reduce(self):
-        # step_field_quality's own regression test: resid must be float64
-        # when precise_reduce (matching its historical, unconditional
-        # behavior) and stack's own dtype -- never float64 -- when not,
-        # even though none of a/u/v/basis/coeffs/delta arrive pre-cast to
-        # stack's dtype (basis in particular is always float64 from
+    def test_step_field_quality_resid_dtype_is_accum(self):
+        # step_field_quality's own regression test: resid must come out in
+        # precision.accum, even though none of a/u/v/basis/coeffs/delta
+        # arrive pre-cast to it (basis in particular is always float64 from
         # spatial_basis).
         rng = np.random.default_rng(2)
         N, H, W = 10, 40, 50
@@ -363,14 +404,14 @@ class TestStepField:
         basis = spatial_basis(H, W, "poly", np, degree=1)
         coeffs = rng.standard_normal((basis.shape[0], N)) * 0.01
 
-        rms_precise, resid_precise = step_field_quality(
-            stack, a, u, v, delta, coeffs, basis, H, W, crop=5, precise_reduce=True)
+        rms_single, resid_single = step_field_quality(
+            stack, a, u, v, delta, coeffs, basis, H, W, crop=5, precision="single")
         rms_fast, resid_fast = step_field_quality(
-            stack, a, u, v, delta, coeffs, basis, H, W, crop=5, precise_reduce=False)
+            stack, a, u, v, delta, coeffs, basis, H, W, crop=5, precision="fast")
 
-        assert resid_precise.dtype == np.float64
-        assert resid_fast.dtype == stack.dtype
-        assert rms_fast == pytest.approx(rms_precise, abs=1e-4)
+        assert resid_single.dtype == np.float64
+        assert resid_fast.dtype == np.float32
+        assert rms_fast == pytest.approx(rms_single, abs=1e-4)
 
     def test_refine_loop_keeps_best_round_not_last(self, monkeypatch):
         """A round that makes rms_frac worse must not stop the loop early or be returned.

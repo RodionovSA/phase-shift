@@ -33,10 +33,6 @@ class PhaseConfig:
     method_kwargs : dict, default {}
         Keyword arguments passed to the method, e.g. ``{"iters": 50}`` for
         ``"aia"``.
-    precise_reduce : bool, default True
-        Run the method's reductions over the full stack in float64, using a
-        temporary float64 copy of the stack. If False, they run in the working
-        dtype with less memory.
     noise_std : np.ndarray, shape (H, W), optional
         Per-pixel camera noise standard deviation ``sigma_0``,
         ``docs/aia.md`` Eq. (32). Defaults to the per-pixel RMS fit residual.
@@ -59,7 +55,6 @@ class PhaseConfig:
     g: np.ndarray | None = None
     method: str = "aia"
     method_kwargs: dict = field(default_factory=dict)
-    precise_reduce: bool = True
     noise_std: np.ndarray | None = None
     phi_error_simplified: bool = True
 
@@ -87,7 +82,6 @@ class PhaseConfig:
             "g": self.g.tolist() if self.g is not None else None,
             "method": self.method,
             "method_kwargs": self.method_kwargs,
-            "precise_reduce": self.precise_reduce,
             "noise_std": self.noise_std.tolist() if self.noise_std is not None else None,
             "phi_error_simplified": self.phi_error_simplified,
         }

@@ -94,20 +94,20 @@ def measure(pixels: int, frames: int, pairs: int, blocks: int, sigma: float,
         step_errors = {name: [] for name in names[1:]}
         for sign in (1, -1):
             stack = truth + sign * noise
-            _, ub, vb = pixel_step(stack, delta, g, dtype=np.float64)
+            _, ub, vb = pixel_step(stack, delta, g, precision="double")
             phase_errors["baseline"].append(wrap(np.arctan2(-vb, ub) - phi))
             if estimator == "conditional":
                 steps, gains, _ = frame_step(stack, u, v)
             for name, fit_gain in (("stage2", False), ("stage3", True)):
                 if estimator == "conditional":
                     _, uf, vf = pixel_step(stack, steps, gains if fit_gain else g,
-                                          dtype=np.float64)
+                                          precision="double")
                     recovered = np.arctan2(-vf, uf)
                     fitted_steps = steps
                 else:
                     _, _, recovered, fitted_steps, _, diagnostics = aia(
                         stack.reshape(frames, 1, pixels), g, fit_gain=fit_gain,
-                        delta0=delta, iters=300, tol=1e-11, dtype=np.float64)
+                        delta0=delta, iters=300, tol=1e-11, precision="double")
                     recovered = recovered.ravel()
                     failed[name] += int(not diagnostics.converged)
                     max_iterations[name] = max(max_iterations[name], diagnostics.iters_run)

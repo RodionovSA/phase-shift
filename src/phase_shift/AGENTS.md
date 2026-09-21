@@ -32,7 +32,7 @@ Rules for the `phase_shift` package. The root `AGENTS.md` still applies.
 - Imports point one way: `solver` -> `methods` -> shared modules, `backend`.
   Method modules never import `solver` or each other's private helpers.
 - A new method is a function
-  `(stack, g, fit_gain=False, dtype=None, precise_reduce=True, **kwargs)
+  `(stack, g, fit_gain=False, precision=None, **kwargs)
   -> (a, b, phi, delta, g, method_param)`, a `MethodParam` subclass for its
   diagnostics, and one `METHOD_REGISTRY` entry. `solver.py` stays unchanged.
 - Re-export public names in `__init__.py`; prefix everything else with `_`.
@@ -44,9 +44,20 @@ Rules for the `phase_shift` package. The root `AGENTS.md` still applies.
   `xp = get_array_module(...)` and use `xp.` throughout. Call `to_device` only
   at public entry points; return results on the device they were computed on.
 - Everything must run with NumPy alone; no CuPy-only code without a NumPy path.
-- Large `(N, H, W)` / `(N, P)` arrays use the working dtype (`default_dtype`,
-  float32). Small linear algebra, `(N,)` vectors, and scalar reductions use
-  float64.
+- Precision is one object, `backend.Precision`, threaded like `device`: every
+  public function takes `precision=None`, resolves it once with
+  `p = Precision.of(precision)`, and passes `p` down. Never hard-code
+  `float32`, and never add a second precision knob.
+  - `p.work`: the large `(N, H, W)` / `(N, P)` arrays and the `(H, W)` fields
+    recovered from them (`a`, `b`, `phi`, `phi_error`).
+  - `p.accum`: the dtype operands are cast to for a reduction or matrix
+    product over the full stack.
+  - Everything else -- small linear algebra, `(N,)` vectors, scalar
+    reductions, coordinate grids, bases -- is float64 whatever the precision.
+- Presets: `"single"` (work float32, accum float64, the default), `"double"`,
+  `"fast"` (both float32). A `(N, P)` array must never come out wider than
+  `p.work` by accident: cast the `(N,)` and `(J, P)` operands feeding it
+  first, as `sf_aia.aia_step_field` does with `basis_work`.
 - Avoid extra full-size temporaries: prefer scalar sums or chunked reductions.
 - Minimize host syncs (`float(...)`, `asnumpy`): at most a few per iteration,
   never per pixel or per frame inside a loop.

@@ -12,9 +12,8 @@ from dataclasses import dataclass
 from types import ModuleType
 
 import numpy as np
-from numpy.typing import DTypeLike
 
-from ..backend import default_dtype, get_array_module
+from ..backend import Precision, get_array_module
 from ..basis import BASES, spatial_basis
 from ..errors import step_field_phi_error
 from ..utils import format_value
@@ -126,7 +125,8 @@ def fit_step_field(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.ndarra
 def step_field_quality(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.ndarray,
                        delta: np.ndarray, coeffs: np.ndarray, basis: np.ndarray,
                        H: int, W: int, g: np.ndarray | None = None, crop: int = 100,
-                       precise_reduce: bool = True) -> tuple[float, np.ndarray]:
+                       precision: str | Precision | None = None
+                       ) -> tuple[float, np.ndarray]:
     """Score how much of the residual the fitted step field explains.
 
     Step 4 of ``docs/sf_aia.md`` §"Algorithm": rebuild every frame at the
@@ -155,18 +155,17 @@ def step_field_quality(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.nd
     crop : int, default 100
         Pixels excluded from each edge before either RMS; ``0`` uses the full
         field.
-    precise_reduce : bool, default True
-        See :attr:`phase_shift.config.PhaseConfig.precise_reduce`. Sets the
-        dtype of every operand feeding the ``(N, P)`` reconstruction, and so
-        of ``resid``.
+    precision : str or Precision, optional
+        Dtypes to run in; see :class:`phase_shift.backend.Precision`. Its
+        ``accum`` is the dtype of every operand feeding the ``(N, P)``
+        reconstruction, and so of ``resid``.
 
     Returns
     -------
     rms_frac : float
         Residual RMS over the cropped region, divided by ``stack``'s.
     resid : np.ndarray, shape (N, P)
-        Residual of the corrected model, uncropped, float64 when
-        ``precise_reduce`` else ``stack``'s dtype.
+        Residual of the corrected model, uncropped, in ``precision.accum``.
 
     Raises
     ------
@@ -202,7 +201,7 @@ def step_field_quality(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.nd
     # Every operand must reach calc_dtype before the (N, P) arrays are built;
     # casting resid afterwards is too late. basis is float64 from
     # spatial_basis, and u/v are float64 in this module's own use.
-    calc_dtype = xp.float64 if precise_reduce else stack.dtype
+    calc_dtype = Precision.of(precision).accum
     delta = xp.asarray(delta, dtype=calc_dtype)
     coeffs = xp.asarray(coeffs, dtype=calc_dtype)
     g = xp.ones(N, dtype=calc_dtype) if g is None else xp.asarray(g, dtype=calc_dtype)
@@ -222,11 +221,8 @@ def step_field_quality(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.nd
         mask[:crop] = mask[-crop:] = mask[:, :crop] = mask[:, -crop:] = False
     mask = mask.ravel()
 
-    if precise_reduce:
-        rms_frac = float(xp.std(resid[:, mask].astype(xp.float64))
-                         / xp.std(stack[:, mask].astype(xp.float64)))
-    else:
-        rms_frac = float(xp.std(resid[:, mask]) / xp.std(stack[:, mask]))
+    rms_frac = float(xp.std(resid[:, mask], dtype=calc_dtype)
+                     / xp.std(stack[:, mask], dtype=calc_dtype))
     return rms_frac, resid
 
 
@@ -268,11 +264,9 @@ class StepFieldParam(MethodParam):
     best_iter : int
         Round the reported coefficients come from, not necessarily the last;
         ``-1`` when no round ran.
-    precise_reduce : bool
-        See :attr:`phase_shift.config.PhaseConfig.precise_reduce`. Carried so
-        :meth:`phase_step_field` can honor it.
-    work_dtype : dtype
-        Working dtype the solve ran in.
+    precision : Precision
+        Dtypes the solve ran in, carried so :meth:`phase_step_field` rebuilds
+        the step field the way :func:`step_field_quality` scored it.
     """
 
     aia_param: AIAParam
@@ -286,8 +280,7 @@ class StepFieldParam(MethodParam):
     refine_iters_run: int
     refine_converged: bool
     best_iter: int
-    precise_reduce: bool
-    work_dtype: DTypeLike
+    precision: Precision
 
     def phi_error(self, b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: np.ndarray,
                   fit_gain: bool, noise_std: np.ndarray, simplified: bool,
@@ -326,7 +319,8 @@ class StepFieldParam(MethodParam):
         Overrides the piston-only broadcast of
         :meth:`phase_shift.methods.base.MethodParam.phase_step_field` with the
         spatially varying step this method recovers, ``docs/sf_aia.md``
-        Eq. (T1). Honors ``precise_reduce`` as :func:`step_field_quality` does.
+        Eq. (T1). Built in ``precision.accum``, as
+        :func:`step_field_quality` does.
 
         Parameters
         ----------
@@ -341,7 +335,7 @@ class StepFieldParam(MethodParam):
         -------
         np.ndarray, shape (N, H, W)
         """
-        calc_dtype = xp.float64 if self.precise_reduce else self.work_dtype
+        calc_dtype = self.precision.accum
         basis = spatial_basis(H, W, self.basis, xp, **self.basis_kwargs)
         basis = basis.astype(calc_dtype, copy=False)                     # (J, P)
         coeffs = xp.asarray(self.coeffs, dtype=calc_dtype)
@@ -352,10 +346,9 @@ class StepFieldParam(MethodParam):
 
 def aia_step_field(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
                    delta0: np.ndarray | None = None, iters: int = 30, tol: float = 1e-4,
-                   dtype: DTypeLike = None, basis: str = "poly",
+                   precision: str | Precision | None = None, basis: str = "poly",
                    basis_kwargs: dict | None = None, refine_iters: int = 5,
-                   refine_tol: float = 1e-3, crop: int = 100,
-                   precise_reduce: bool = True
+                   refine_tol: float = 1e-3, crop: int = 100
                    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
                               StepFieldParam]:
     """Recover phase with a spatially varying phase step.
@@ -376,8 +369,9 @@ def aia_step_field(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
         Per-frame fringe gain; see :func:`phase_shift.methods.aia.aia`.
     fit_gain : bool, default False
         Recover ``g`` jointly, in the initial solve and in every round.
-    delta0, iters, tol, dtype
-        Passed to the initial :func:`phase_shift.methods.aia.aia` call.
+    delta0, iters, tol, precision
+        Passed to the initial :func:`phase_shift.methods.aia.aia` call;
+        ``precision`` applies to the refinement rounds too.
     basis : str, default "poly"
         Step-field basis family, one of :data:`phase_shift.basis.BASES`.
     basis_kwargs : dict, optional
@@ -395,8 +389,6 @@ def aia_step_field(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
     crop : int, default 100
         Pixels excluded from each edge when scoring; see
         :func:`step_field_quality`.
-    precise_reduce : bool, default True
-        See :attr:`phase_shift.config.PhaseConfig.precise_reduce`.
 
     Returns
     -------
@@ -418,16 +410,16 @@ def aia_step_field(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
 
     xp = get_array_module(stack)
     N, H, W = stack.shape
-    work_dtype = dtype if dtype is not None else default_dtype(xp)
-    I = stack.reshape(N, -1).astype(work_dtype, copy=False)        # (N, P)
+    p = Precision.of(precision)
+    I = stack.reshape(N, -1).astype(p.work, copy=False)            # (N, P)
     g = xp.asarray(g, dtype=xp.float64)
     basis_kwargs = dict(basis_kwargs) if basis_kwargs else {}
-    basis_rows = spatial_basis(H, W, basis, xp, **basis_kwargs)    # (J, P)
+    basis_rows = spatial_basis(H, W, basis, xp, **basis_kwargs)    # (J, P) float64
+    basis_work = basis_rows.astype(p.work, copy=False)             # (J, P)
     J = basis_rows.shape[0]
 
     a_map, b0, phi0, delta, g, aia_param0 = aia(stack, g, fit_gain=fit_gain, delta0=delta0,
-                                                iters=iters, tol=tol, dtype=dtype,
-                                                precise_reduce=precise_reduce)
+                                                iters=iters, tol=tol, precision=p)
     a = a_map.reshape(-1)
     u = (b0 * xp.cos(phi0)).reshape(-1)
     v = (-b0 * xp.sin(phi0)).reshape(-1)
@@ -448,12 +440,11 @@ def aia_step_field(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
     # An empty basis leaves nothing to fit, so the plain aia() result passes
     # through unchanged, as with refine_iters=0.
     for it in range(refine_iters if J > 0 else 0):
-        Ic = I - c.astype(work_dtype)[:, None] if fit_gain else I
+        Ic = I - c.astype(p.work)[:, None] if fit_gain else I
         coeffs_it, cond = fit_step_field(Ic, a, u, v, delta, basis_rows, g=g)
         kappa_it = float(xp.max(cond))
         rms_frac_it, _ = step_field_quality(Ic, a, u, v, delta, coeffs_it, basis_rows,
-                                            H, W, g=g, crop=crop,
-                                            precise_reduce=precise_reduce)
+                                            H, W, g=g, crop=crop, precision=p)
         rms_history.append(rms_frac_it)
 
         # The snapshot holds the fields this round was fit and scored against,
@@ -473,16 +464,18 @@ def aia_step_field(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
 
         # Correct the original stack: each round estimates the total field,
         # not an increment. Eq. (E1) fits resid ~= -w*Delta, so the correction
-        # adds it back.
-        cd, sd = xp.cos(delta), xp.sin(delta)
-        w = g[:, None] * (xp.outer(sd, u) - xp.outer(cd, v))
-        corrected = I + w * (coeffs_fixed.T @ basis_rows)             # (N, P)
-        corrected_Ic = corrected - c.astype(work_dtype)[:, None] if fit_gain else corrected
+        # adds it back. Every operand is in the working dtype, so the
+        # corrected stack costs no more than the stack itself.
+        gs = (g * xp.sin(delta)).astype(p.work)                       # (N,)
+        gc = (g * xp.cos(delta)).astype(p.work)
+        w = xp.outer(gs, u) - xp.outer(gc, v)                         # (N, P)
+        corrected = I + w * (coeffs_fixed.T.astype(p.work) @ basis_work)
+        corrected_Ic = corrected - c.astype(p.work)[:, None] if fit_gain else corrected
 
-        a, u, v = pixel_step(corrected_Ic, delta, g, dtype=work_dtype)
+        a, u, v = pixel_step(corrected_Ic, delta, g, precision=p)
         if fit_gain:
             u, v = whiten_uv(u, v, xp)
-        new_delta, new_g, new_c = frame_step(corrected, u, v, precise_reduce=precise_reduce)
+        new_delta, new_g, new_c = frame_step(corrected, u, v, precision=p)
         delta = pin_phase_origin(new_delta)
         if fit_gain:
             c = center_offsets(new_c, xp)
@@ -500,11 +493,10 @@ def aia_step_field(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
         coeffs_rms=xp.sqrt(xp.mean(coeffs ** 2, axis=1)), kappa_fit=kappa_fit,
         rms_frac=rms_frac, rms_frac_history=rms_history,
         refine_iters_run=refine_iters_run, refine_converged=refine_converged,
-        best_iter=best_iter, precise_reduce=precise_reduce, work_dtype=work_dtype,
+        best_iter=best_iter, precision=p,
     )
 
     phi = xp.arctan2(-v, u).reshape(H, W)
-    u64, v64 = u.astype(xp.float64), v.astype(xp.float64)
-    b = xp.sqrt(u64 ** 2 + v64 ** 2).reshape(H, W)
+    b = xp.hypot(u, v).reshape(H, W)
     a_map = a.reshape(H, W)
     return a_map, b, phi, delta, g, method_param

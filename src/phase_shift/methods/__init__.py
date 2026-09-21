@@ -2,7 +2,7 @@
 """Registry of phase-recovery methods for :class:`phase_shift.solver.PhaseSolver`.
 
 Each entry maps a name to a callable
-``(stack, g, fit_gain=False, dtype=None, precise_reduce=True, **method_kwargs)
+``(stack, g, fit_gain=False, precision=None, **method_kwargs)
 -> (a, b, phi, delta, g, method_param)``, the fields of
 ``docs/interference_model.md`` Eq. (17). The returned ``g`` is the input passed
 through unchanged when ``fit_gain`` is False, else the gain fitted alongside

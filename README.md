@@ -163,12 +163,37 @@ This installs the optional `cupy-cuda12x` backend retained from the source
 project. It requires a compatible NVIDIA GPU, CUDA runtime, and driver. CPU
 installation does not require CuPy or CUDA.
 
-The large `(N, P)`-shaped arrays default to `float32` (`dtype=` on
-`PhaseSolver`/`measure_frame_contrast` overrides this); the small
-per-iteration linear algebra (condition numbers, normal-equation solves,
-reductions) use `float64` by default; `precise_reduce=False` enables the
-existing faster reduction option. Numerical conventions and algorithms are
-retained from the source.
+## Precision
+
+Every entry point takes `precision=`, alongside `device=`, and
+`phase_shift.set_precision(...)` sets the package-wide default for the ones
+that are left alone:
+
+```python
+import phase_shift as ps
+
+ps.set_precision("double")                       # package-wide default
+ps.PhaseSolver(cfg, device="cuda", precision="single").fit(stack)
+```
+
+A precision fixes two dtypes. `work` is the dtype of the large `(N, H, W)` /
+`(N, P)` arrays and of the recovered fields `phi`, `a`, `b` and `phi_error`.
+`accum` is the dtype the operands of a reduction or matrix product over the
+full stack are cast to; above `work` it costs a temporary copy of the stack
+and buys back the precision a float32 sum over the pixels loses.
+
+| preset | `work` | `accum` | |
+|---|---|---|---|
+| `"single"` | float32 | float64 | the default |
+| `"double"` | float64 | float64 | reference numbers, ~2x the memory |
+| `"fast"` | float32 | float32 | lowest memory, least accurate reductions |
+
+Everything else — the per-iteration linear algebra, condition numbers,
+normal-equation solves, the `(N,)` vectors `delta`, `g` and `alpha`, and the
+polynomial bases — is `float64` whatever the precision. A solver resolves its
+precision once, at construction, and records it on
+`solver.result.precision`. Numerical conventions and algorithms are retained
+from the source.
 
 ## Status
 

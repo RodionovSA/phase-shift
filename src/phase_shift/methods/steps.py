@@ -10,10 +10,8 @@ them is AIA; SF-AIA and VP-AIA reuse both.
 from types import ModuleType
 
 import numpy as np
-from numpy.typing import DTypeLike
 
-from .. import backend as _backend
-from ..backend import get_array_module
+from ..backend import Precision, get_array_module
 
 
 def pixel_design(delta: np.ndarray, g: np.ndarray, xp: ModuleType) -> np.ndarray:
@@ -36,7 +34,8 @@ def pixel_design(delta: np.ndarray, g: np.ndarray, xp: ModuleType) -> np.ndarray
 
 
 def pixel_step(stack: np.ndarray, delta: np.ndarray, g: np.ndarray | None = None,
-               dtype: DTypeLike = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+               precision: str | Precision | None = None
+               ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Solve every pixel's background and quadrature fields.
 
     With the phase steps and gains fixed, each pixel is the linear regression
@@ -53,15 +52,15 @@ def pixel_step(stack: np.ndarray, delta: np.ndarray, g: np.ndarray | None = None
         Per-frame phase step, in radians.
     g : np.ndarray, shape (N,), optional
         Per-frame fringe gain. Defaults to all ones.
-    dtype : dtype, optional
-        Working dtype of the returned fields. Defaults to
-        :func:`phase_shift.backend.default_dtype`; the design matrix and its
-        pseudoinverse are always float64.
+    precision : str or Precision, optional
+        Dtypes to run in; see :class:`phase_shift.backend.Precision`. The
+        returned fields are in ``precision.work``; the design matrix and its
+        pseudoinverse are float64 regardless.
 
     Returns
     -------
     a, u, v : np.ndarray, shape (P,)
-        Background and quadrature components, in ``dtype``.
+        Background and quadrature components, in ``precision.work``.
 
     Raises
     ------
@@ -80,17 +79,17 @@ def pixel_step(stack: np.ndarray, delta: np.ndarray, g: np.ndarray | None = None
 
     xp = get_array_module(stack)
     N = stack.shape[0]
-    work_dtype = dtype if dtype is not None else _backend.default_dtype(xp)
+    p = Precision.of(precision)
     delta = xp.asarray(delta, dtype=xp.float64)
     g = xp.ones(N, dtype=xp.float64) if g is None else xp.asarray(g, dtype=xp.float64)
 
     A = pixel_design(delta, g, xp)                                  # (N, 3) float64
-    X = xp.linalg.pinv(A).astype(work_dtype) @ stack                # (3, P)
+    X = xp.linalg.pinv(A).astype(p.work) @ stack                    # (3, P)
     return X[0], X[1], X[2]
 
 
 def frame_step(stack: np.ndarray, u: np.ndarray, v: np.ndarray,
-               precise_reduce: bool = True
+               precision: str | Precision | None = None
                ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Solve every frame's phase step, gain, and offset.
 
@@ -110,8 +109,10 @@ def frame_step(stack: np.ndarray, u: np.ndarray, v: np.ndarray,
         Interferogram frames flattened to ``P`` pixels each.
     u, v : np.ndarray, shape (P,)
         Quadrature components, e.g. from :func:`pixel_step`.
-    precise_reduce : bool, default True
-        See :attr:`phase_shift.config.PhaseConfig.precise_reduce`.
+    precision : str or Precision, optional
+        Dtypes to run in; see :class:`phase_shift.backend.Precision`. Only
+        ``precision.accum`` matters here, as the dtype ``u`` and ``v`` are
+        cast to for the one reduction over the full stack.
 
     Returns
     -------
@@ -138,10 +139,11 @@ def frame_step(stack: np.ndarray, u: np.ndarray, v: np.ndarray,
 
     xp = get_array_module(stack, u, v)
     P = stack.shape[1]
+    p = Precision.of(precision)
     u64 = xp.asarray(u, dtype=xp.float64)
     v64 = xp.asarray(v, dtype=xp.float64)
 
-    # (P,)-sized, so float64 regardless of precise_reduce: never touches stack.
+    # (P,)-sized, so float64 whatever the precision: never touches stack.
     Su, Sv = float(xp.sum(u64)), float(xp.sum(v64))
     Suu = float(xp.sum(u64 * u64))
     Svv = float(xp.sum(v64 * v64))
@@ -149,10 +151,10 @@ def frame_step(stack: np.ndarray, u: np.ndarray, v: np.ndarray,
     BtB = xp.asarray([[float(P), Su, Sv], [Su, Suu, Suv], [Sv, Suv, Svv]])
 
     # The one reduction over the full stack, and so the one place
-    # precise_reduce changes the memory cost.
-    u_mm = u64 if precise_reduce else xp.asarray(u, dtype=stack.dtype)
-    v_mm = v64 if precise_reduce else xp.asarray(v, dtype=stack.dtype)
-    IB = xp.stack([xp.sum(stack, axis=1).astype(xp.float64),
+    # precision.accum changes the memory cost.
+    u_mm = xp.asarray(u, dtype=p.accum)
+    v_mm = xp.asarray(v, dtype=p.accum)
+    IB = xp.stack([xp.sum(stack, axis=1, dtype=p.accum).astype(xp.float64),
                    (stack @ u_mm).astype(xp.float64),
                    (stack @ v_mm).astype(xp.float64)], axis=1)       # (N, 3)
 

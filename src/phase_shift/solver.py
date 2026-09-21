@@ -2,9 +2,8 @@
 """Phase extraction front end dispatching to registered methods."""
 
 import numpy as np
-from numpy.typing import DTypeLike
 
-from .backend import get_array_module, to_device
+from .backend import Precision, get_array_module, to_device
 from .config import PhaseConfig
 from .interference_model import model_stack
 from .methods import METHOD_REGISTRY, MethodParam
@@ -20,21 +19,30 @@ class PhaseSolver:
         Method and options.
     device : {"auto", "cpu", "cuda"}, default "auto"
         Device to run on; see :func:`phase_shift.backend.to_device`.
-    dtype : dtype, optional
-        Working dtype. If None, the stack keeps its dtype and the method uses
-        :func:`phase_shift.backend.default_dtype`.
+    precision : {"single", "double", "fast"} or Precision, optional
+        Dtypes to run in; see :class:`phase_shift.backend.Precision`. Resolved
+        once here, so a later :func:`phase_shift.backend.set_precision` does
+        not change this solver. Defaults to
+        :func:`phase_shift.backend.get_precision`.
 
     Attributes
     ----------
+    precision : Precision
+        The resolved precision this solver runs in.
     result : PhaseResult or None
         Result of the last :meth:`fit`; ``None`` before fitting.
+
+    Raises
+    ------
+    ValueError
+        If ``precision`` is not recognized.
     """
 
     def __init__(self, config: PhaseConfig, device: str = "auto",
-                 dtype: DTypeLike = None) -> None:
+                 precision: str | Precision | None = None) -> None:
         self.config = config
         self.device = device
-        self.dtype = dtype
+        self.precision = Precision.of(precision)
         self.result: PhaseResult | None = None
 
     def fit(self, stack: np.ndarray) -> "PhaseSolver":
@@ -63,7 +71,7 @@ class PhaseSolver:
         """
         if stack.ndim != 3:
             raise ValueError(f"stack must be 3-D (N, H, W), got shape {stack.shape}")
-        stack = to_device(stack, device=self.device, dtype=self.dtype)
+        stack = to_device(stack, device=self.device, dtype=self.precision.work)
         xp = get_array_module(stack)
 
         normalized_stack, alpha = self._alpha_norm(stack, self.config.use_alpha)
@@ -75,7 +83,8 @@ class PhaseSolver:
         phi_error = self._phi_error(b, phi, delta, g, fit_gain, residual_mean_sq,
                                     method_param)
 
-        self.result = PhaseResult(phi, a, b, delta, g, alpha, method_param, rmse, phi_error)
+        self.result = PhaseResult(phi, a, b, delta, g, alpha, method_param, rmse,
+                                  self.precision, phi_error)
         return self
 
     def _solve(self, stack: np.ndarray, g: np.ndarray, fit_gain: bool
@@ -90,8 +99,8 @@ class PhaseSolver:
             :class:`phase_shift.result.PhaseResult`.
         """
         solve_fn = METHOD_REGISTRY[self.config.method.lower()]
-        return solve_fn(stack, g, fit_gain=fit_gain, dtype=self.dtype,
-                        precise_reduce=self.config.precise_reduce, **self.config.method_kwargs)
+        return solve_fn(stack, g, fit_gain=fit_gain, precision=self.precision,
+                        **self.config.method_kwargs)
 
     def _alpha_norm(self, stack: np.ndarray, use_alpha: bool) -> tuple[np.ndarray, np.ndarray]:
         """Divide each frame by its source-power factor ``alpha_n``.
@@ -126,8 +135,7 @@ class PhaseSolver:
         if not float(xp.min(m)) > 0:
             raise ValueError("every frame must have a positive mean intensity")
         alpha = m / xp.median(m)
-        scale = alpha.astype(stack.dtype) if stack.dtype.kind == "f" else alpha
-        return stack / scale[:, None, None], alpha
+        return stack / alpha.astype(stack.dtype)[:, None, None], alpha
 
     def _g_fit(self, stack: np.ndarray, gain_mode: str,
                g: np.ndarray | None = None) -> tuple[np.ndarray, bool]:
@@ -192,7 +200,7 @@ class PhaseSolver:
             Residual mean square, in squared input units.
         """
         xp = get_array_module(stack)
-        work = b.dtype
+        work = self.precision.work
         N, H, W = stack.shape
         delta_field = method_param.phase_step_field(delta.astype(work), H, W, xp)
         g_w = g.astype(work)
@@ -240,7 +248,8 @@ class PhaseSolver:
         """
         xp = get_array_module(b)
         if self.config.noise_std is not None:
-            noise_std = to_device(self.config.noise_std, device=self.device, dtype=b.dtype)
+            noise_std = to_device(self.config.noise_std, device=self.device,
+                                  dtype=self.precision.work)
         else:
             noise_std = xp.sqrt(residual_mean_sq)
         if noise_std.shape != phi.shape:

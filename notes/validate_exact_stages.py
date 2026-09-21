@@ -203,7 +203,7 @@ def _step_bias(case: dict, pairs: int, seed: int, noise_scale: float,
         for sign in (+1, -1):
             meas = (case["I"] + sign * z).astype(np.float64)
             if alternate:
-                fitted = aia(meas, case["g"].copy(), fit_gain=False, dtype=np.float64,
+                fitted = aia(meas, case["g"].copy(), fit_gain=False, precision="double",
                              iters=400, tol=1e-12)[3]
             else:
                 coef = np.linalg.lstsq(B, meas.reshape(N, -1).T, rcond=None)[0]
@@ -228,7 +228,7 @@ def run_step_bias(pairs: int, seed: int) -> list[dict]:
         count = max(60, pairs // max(1, (side // 16) ** 2))
         bias, se = _step_bias(case, count, seed, scale, alternate)
         noise_free = aia(case["I"].astype(np.float64), case["g"].copy(), fit_gain=False,
-                         dtype=np.float64, iters=3000, tol=1e-14)[3]
+                         precision="double", iters=3000, tol=1e-14)[3]
         exact = np.angle(np.exp(1j * (noise_free - case["delta"])))
         rows.append(dict(Np=case["Np"], noise_scale=scale, alternating=alternate,
                          pairs=count, bias_rms=bias, bias_se=se,

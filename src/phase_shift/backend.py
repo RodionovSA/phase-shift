@@ -1,6 +1,7 @@
 # src/phase_shift/backend.py
-"""NumPy/CuPy array-module dispatch and device placement."""
+"""NumPy/CuPy array-module dispatch, device placement, and working precision."""
 
+from dataclasses import dataclass
 from types import ModuleType
 
 import numpy as np
@@ -12,6 +13,14 @@ except ImportError:  # pragma: no cover
     _cp = None
 
 CUPY_AVAILABLE = _cp is not None
+
+PRECISIONS = ("single", "double", "fast")
+
+_PRESETS = {
+    "single": (np.float32, np.float64),
+    "double": (np.float64, np.float64),
+    "fast": (np.float32, np.float32),
+}
 
 
 def get_array_module(*arrays: np.ndarray) -> ModuleType:
@@ -71,14 +80,97 @@ def asnumpy(x: ArrayLike) -> np.ndarray:
     return np.asarray(x)
 
 
-def default_dtype(xp: ModuleType, complex_: bool = False) -> type[np.generic]:
-    """Return the working dtype for large arrays: ``float32`` or ``complex64``.
+@dataclass(frozen=True)
+class Precision:
+    """Dtypes a solve runs in.
+
+    Small linear algebra, ``(N,)`` vectors, and scalar reductions stay float64
+    whatever the precision; only the two dtypes below vary. Build one from a
+    preset name with :meth:`of`, or from a pair of dtypes directly.
+
+    Attributes
+    ----------
+    work : np.dtype
+        Dtype of the large ``(N, H, W)`` / ``(N, P)`` arrays and of the fields
+        recovered from them.
+    accum : np.dtype
+        Dtype the operands of reductions and matrix products over the full
+        stack are cast to. Above ``work`` it costs a temporary copy of the
+        stack and buys back the precision a float32 sum over ``P`` pixels
+        loses.
+    """
+
+    work: np.dtype
+    accum: np.dtype
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "work", np.dtype(self.work))
+        object.__setattr__(self, "accum", np.dtype(self.accum))
+
+    @classmethod
+    def of(cls, precision: "str | Precision | None" = None) -> "Precision":
+        """Resolve a preset name, a :class:`Precision`, or None to a precision.
+
+        Parameters
+        ----------
+        precision : str or Precision, optional
+            One of :data:`PRECISIONS`, an explicit :class:`Precision`, or None
+            for the package default, :func:`get_precision`.
+
+        Returns
+        -------
+        Precision
+
+        Raises
+        ------
+        ValueError
+            If ``precision`` is neither a registered preset name nor a
+            :class:`Precision`.
+        """
+        if precision is None:
+            return _precision
+        if isinstance(precision, cls):
+            return precision
+        if isinstance(precision, str) and precision in _PRESETS:
+            return cls(*_PRESETS[precision])
+        raise ValueError(
+            f"unknown precision {precision!r}, expected one of {PRECISIONS} "
+            f"or a Precision instance"
+        )
+
+
+_precision = Precision.of("single")
+
+
+def get_precision() -> Precision:
+    """Return the package-wide default precision, ``"single"`` unless set."""
+    return _precision
+
+
+def set_precision(precision: "str | Precision") -> Precision:
+    """Set the package-wide default precision.
+
+    Applies to every function and solver built afterwards that is not given an
+    explicit ``precision``. A :class:`phase_shift.solver.PhaseSolver` resolves
+    it once, at construction.
 
     Parameters
     ----------
-    xp : module
-        ``numpy`` or ``cupy``.
-    complex_ : bool, default False
-        Return the complex dtype.
+    precision : str or Precision
+        One of :data:`PRECISIONS`, or an explicit :class:`Precision`.
+
+    Returns
+    -------
+    Precision
+        The resolved precision now in effect.
+
+    Raises
+    ------
+    ValueError
+        If ``precision`` is not recognized.
     """
-    return xp.complex64 if complex_ else xp.float32
+    global _precision
+    if precision is None:
+        raise ValueError(f"precision must be one of {PRECISIONS} or a Precision, got None")
+    _precision = Precision.of(precision)
+    return _precision

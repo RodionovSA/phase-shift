@@ -24,11 +24,12 @@ Public API, re-exported here regardless of which submodule a name lives in:
   of the above; every function accepts a ``device="auto"|"cpu"|"cuda"``
   argument and returns result arrays on whichever device it ran on. Use
   ``phase_shift.backend.asnumpy`` to bring a result field back to the host
-  explicitly.
+  explicitly. ``Precision``, ``set_precision`` and ``get_precision`` set the
+  dtypes a solve runs in, either package-wide or per solver.
 """
 
 from . import backend
-from .backend import asnumpy
+from .backend import PRECISIONS, Precision, asnumpy, get_precision, set_precision
 from .basis import BASES, spatial_basis
 from .carrier import CarrierResult, remove_carrier
 from .combine import CombinedResult, combine_acquisitions
@@ -59,4 +60,8 @@ __all__ = [
     "combine_acquisitions",
     "backend",
     "asnumpy",
+    "Precision",
+    "PRECISIONS",
+    "get_precision",
+    "set_precision",
 ]

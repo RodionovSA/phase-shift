@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import DTypeLike
 
-from .backend import to_device
+from .backend import Precision, to_device
 from .methods import MethodParam
 from .utils import format_value
 
@@ -38,6 +38,9 @@ class PhaseResult:
     reconstruction_error : float
         RMS difference between the input stack and Eq. (17) evaluated at the
         fitted fields, in input units.
+    precision : Precision
+        Dtypes the solve ran in. ``phi``, ``a`` and ``b`` are in
+        ``precision.work``; ``delta``, ``g`` and ``alpha`` are float64.
     phi_error : np.ndarray, shape (H, W), optional
         Per-pixel phase standard deviation, in radians; see ``docs/aia.md``
         §"Phase-error covariance". ``None`` for methods without an error model.
@@ -51,6 +54,7 @@ class PhaseResult:
     alpha: np.ndarray
     method_param: MethodParam
     reconstruction_error: float
+    precision: Precision
     phi_error: np.ndarray | None = None
 
     def to_device(self, device: str = "auto", dtype: DTypeLike = None) -> "PhaseResult":
@@ -78,6 +82,7 @@ class PhaseResult:
             alpha=to_device(self.alpha, device=device, dtype=dtype),
             method_param=self.method_param,
             reconstruction_error=self.reconstruction_error,
+            precision=self.precision,
             phi_error=to_device(self.phi_error, device=device, dtype=dtype)
             if self.phi_error is not None else None,
         )

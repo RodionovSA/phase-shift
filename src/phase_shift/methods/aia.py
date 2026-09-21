@@ -2,9 +2,8 @@
 """Advanced Iterative Algorithm (AIA) of ``docs/aia.md``."""
 
 import numpy as np
-from numpy.typing import DTypeLike
 
-from ..backend import default_dtype, get_array_module
+from ..backend import Precision, get_array_module
 from ..utils import wrap
 from .diagnostics import AIAParam, aia_diagnostics
 from .gauge import center_offsets, normalize_gain, pin_phase_origin, whiten_uv
@@ -13,7 +12,7 @@ from .steps import frame_step, pixel_step
 
 def aia(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
         delta0: np.ndarray | None = None, iters: int = 30, tol: float = 1e-4,
-        dtype: DTypeLike = None, precise_reduce: bool = True
+        precision: str | Precision | None = None
         ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, AIAParam]:
     """Recover phase and phase steps from a stack with unknown steps.
 
@@ -45,12 +44,10 @@ def aia(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
     tol : float, default 1e-4
         Convergence tolerance on the largest per-frame change in ``delta``,
         and in ``g`` when ``fit_gain`` is set.
-    dtype : dtype, optional
-        Working dtype of the ``(N, P)`` arrays. Defaults to
-        :func:`phase_shift.backend.default_dtype`; the per-iteration linear
-        algebra is float64 regardless.
-    precise_reduce : bool, default True
-        See :attr:`phase_shift.config.PhaseConfig.precise_reduce`.
+    precision : str or Precision, optional
+        Dtypes to run in; see :class:`phase_shift.backend.Precision`. Sets the
+        dtype of the ``(N, P)`` arrays and of the returned fields; the
+        per-iteration linear algebra is float64 regardless.
 
     Returns
     -------
@@ -87,8 +84,8 @@ def aia(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
 
     xp = get_array_module(stack)
     N, H, W = stack.shape
-    work_dtype = dtype if dtype is not None else default_dtype(xp)
-    I = stack.reshape(N, -1).astype(work_dtype, copy=False)          # (N, P)
+    p = Precision.of(precision)
+    I = stack.reshape(N, -1).astype(p.work, copy=False)              # (N, P)
 
     if delta0 is None:
         delta0 = xp.arange(N) * 2 * xp.pi / N
@@ -109,11 +106,11 @@ def aia(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
         g_fit = g
         c_fit = c
         if fit_gain:
-            xp.subtract(I, c_fit.astype(work_dtype)[:, None], out=I_pixel)
-        a, u, v = pixel_step(I_pixel, delta_fit, g_fit, dtype=work_dtype)
+            xp.subtract(I, c_fit.astype(p.work)[:, None], out=I_pixel)
+        a, u, v = pixel_step(I_pixel, delta_fit, g_fit, precision=p)
         if fit_gain:
             u, v = whiten_uv(u, v, xp)
-        new_delta, new_g, new_c = frame_step(I, u, v, precise_reduce=precise_reduce)
+        new_delta, new_g, new_c = frame_step(I, u, v, precision=p)
 
         new_delta = pin_phase_origin(new_delta)
         step = float(xp.abs(wrap(new_delta - delta)).max())
@@ -131,8 +128,7 @@ def aia(stack: np.ndarray, g: np.ndarray, fit_gain: bool = False,
             break
 
     phi = xp.arctan2(-v, u).reshape(H, W)
-    u64, v64 = u.astype(xp.float64), v.astype(xp.float64)
-    b = xp.sqrt(u64**2 + v64**2).reshape(H, W)
+    b = xp.hypot(u, v).reshape(H, W)
     a_map = a.reshape(H, W)
 
     # Diagnostics describe what (a, u, v) were fit against, not the last
