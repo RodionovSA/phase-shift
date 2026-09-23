@@ -6,7 +6,7 @@ step as a first-order correction to the AIA solution, in one pass: the pixel
 fields are eliminated by projection (§"Removing the pixel corrections"), the
 frame corrections and mode coefficients are fitted jointly
 (:func:`phase_shift.methods.vp_system.fit_frame_and_coeffs`), and the pixel
-corrections follow in closed form from Eq. (26). Unlike SF-AIA's alternation
+corrections follow in closed form from Eq. (16). Unlike SF-AIA's alternation
 it reaches the joint least-squares solution without a refinement loop, and so
 without that loop's attenuation bias; see §"Comparison with SF-AIA".
 """
@@ -35,14 +35,14 @@ class VPAIAParam(StepFieldParam):
     The step-field fields are documented on
     :class:`phase_shift.methods.step_field.StepFieldParam`. For this method
     ``kappa_fit`` is the condition number of the one joint system of
-    ``docs/vp_aia.md`` Eq. (25), not a per-frame value: of order 100 for a
+    ``docs/vp_aia.md`` Eq. (15), not a per-frame value: of order 100 for a
     well-posed fit, and independent of the pixel count. The first-order pass
     adds:
 
     Attributes
     ----------
     P_corr, Q_corr : np.ndarray, shape (N,)
-        First-order frame corrections ``P_n^(1)``, ``Q_n^(1)`` of Eq. (24),
+        First-order frame corrections ``P_n^(1)``, ``Q_n^(1)`` of Eq. (14),
         already folded into the reported ``delta`` and ``g``. Large values
         relative to ``(P_n, Q_n)`` mean the AIA baseline was far from the
         first-order solution, so the expansion is being stretched.
@@ -55,7 +55,7 @@ class VPAIAParam(StepFieldParam):
         corrected solution: residual RMS over the cropped field, divided by
         the data's.
     rounds_run : int
-        Number of relinearization rounds run, ``docs/vp_aia.md`` Eq. (28).
+        Number of relinearization rounds run, ``docs/vp_aia.md`` Eq. (18).
         ``1`` is the single first-order pass the method exists for.
     increment_rms : list of float
         RMS over frames and pixels of each round's increment to ``Delta_n``,
@@ -77,7 +77,7 @@ class VPAIAParam(StepFieldParam):
     def phi_error(self, b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: np.ndarray,
                   fit_gain: bool, noise_std: np.ndarray, simplified: bool,
                   xp: ModuleType) -> np.ndarray:
-        """Return ``sigma_Phi`` of ``docs/vp_aia.md`` Eq. (29).
+        """Return ``sigma_Phi`` of ``docs/vp_aia.md`` Eq. (19).
 
         The pixel-step variance plus the variance the fitted step field adds.
         See :meth:`phase_shift.methods.base.MethodParam.phi_error` for the
@@ -109,13 +109,13 @@ def _pixel_corrections(alpha: np.ndarray, u: np.ndarray, v: np.ndarray,
                        P_n: np.ndarray, Q_n: np.ndarray, basis: np.ndarray,
                        acc: np.dtype, xp: ModuleType
                        ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Pixel-field corrections of ``docs/vp_aia.md`` Eq. (26).
+    """Pixel-field corrections of ``docs/vp_aia.md`` Eq. (16).
 
     The three right-hand sides ``sum_n w_n Delta_n``, ``sum_n P_n w_n Delta_n``
     and ``sum_n Q_n w_n Delta_n`` factor through five ``(J,)`` vectors, since
     ``w_n = P_n v - Q_n u`` and ``Delta_n = sum_j alpha_nj H_j``. Evaluating
     them that way needs three ``(P,)`` fields and no ``(N, P)`` array, which
-    is why §"cost" can say ``Delta_n`` need not be stored.
+    is why §"VP-AIA algorithm and cost" can say ``Delta_n`` need not be stored.
 
     Parameters
     ----------
@@ -139,7 +139,7 @@ def _pixel_corrections(alpha: np.ndarray, u: np.ndarray, v: np.ndarray,
     """
     N = P_n.shape[0]
     A = xp.stack([xp.ones(N, dtype=xp.float64), P_n, Q_n], axis=1)        # (N, 3)
-    A_p = (A.T @ A).astype(acc)                                           # (3, 3), Eq. (7)
+    A_p = (A.T @ A).astype(acc)                                           # (3, 3), Eq. (4)
 
     mP = (P_n @ alpha).astype(acc)                                        # (J,)
     mQ = (Q_n @ alpha).astype(acc)
@@ -159,7 +159,7 @@ def _relinearize(I: np.ndarray, out: np.ndarray, u: np.ndarray, v: np.ndarray,
                  delta: np.ndarray, g: np.ndarray, alpha: np.ndarray,
                  basis: np.ndarray, chunk: int, acc: np.dtype,
                  xp: ModuleType) -> np.ndarray:
-    """Remove the accumulated step field from the stack, ``docs/vp_aia.md`` Eq. (28).
+    """Remove the accumulated step field from the stack, ``docs/vp_aia.md`` Eq. (18).
 
     ``I_n' = I_n - g_n b [cos(Phi + delta_n + Delta_n) - cos(Phi + delta_n)]``,
     written in quadrature variables: ``b cos(Phi + theta) = u cos(theta) +
@@ -221,8 +221,8 @@ def aia_variable_projection(stack: np.ndarray, g: np.ndarray, fit_gain: bool = F
 
     Runs the six steps of ``docs/vp_aia.md`` §"VP-AIA algorithm": the AIA
     baseline finished with a pixel step and normalized, then the residual and
-    projector of Eqs. (16)-(18), the joint fit of Eq. (25), the pixel
-    corrections of Eq. (26), the corrected fields of Eq. (27), and a second
+    projector of Eqs. (8)-(10), the joint fit of Eq. (15), the pixel
+    corrections of Eq. (16), the corrected fields of Eq. (17), and a second
     normalization.
 
     Parameters
@@ -232,19 +232,19 @@ def aia_variable_projection(stack: np.ndarray, g: np.ndarray, fit_gain: bool = F
     g : np.ndarray, shape (N,)
         Starting per-frame fringe gain.
     fit_gain : bool, default False
-        Must be True. ``docs/vp_aia.md`` derives Eq. (24) with ``(P_n, Q_n)``
+        Must be True. ``docs/vp_aia.md`` derives Eq. (14) with ``(P_n, Q_n)``
         free in the plane; the fixed-gain case is not derived.
     delta0, iters, tol, precision
         Passed to the AIA baseline; ``precision`` applies to the first-order
         pass too.
     basis : str, default "poly"
-        Mode family for ``H_j`` of Eq. (13), one of
+        Mode family for ``H_j`` of Eq. (6), one of
         :data:`phase_shift.basis.BASES`.
     basis_kwargs : dict, optional
         Arguments for that family, e.g. ``{"degree": 2}``. An empty basis
         (``degree=0``) fits the frame corrections alone.
     rounds : int, default 1
-        Maximum relinearization rounds, ``docs/vp_aia.md`` Eq. (28). ``1`` is
+        Maximum relinearization rounds, ``docs/vp_aia.md`` Eq. (18). ``1`` is
         the single first-order pass; raise it when ``max|Delta_n|`` is large
         enough for the second-order error to matter, since each round reduces
         what remains by a factor of order ``max|Delta_n|``.
@@ -266,7 +266,7 @@ def aia_variable_projection(stack: np.ndarray, g: np.ndarray, fit_gain: bool = F
     ------
     ValueError
         If ``fit_gain`` is False, if ``basis`` is not registered, or if the
-        frame count or mode count is outside what Eq. (15) allows.
+        frame count or mode count is outside what Eq. (7) allows.
 
     References
     ----------
@@ -280,7 +280,7 @@ def aia_variable_projection(stack: np.ndarray, g: np.ndarray, fit_gain: bool = F
     if not fit_gain:
         raise ValueError(
             "vp_aia fits the per-frame gain jointly: use gain_mode='joint' and "
-            "leave PhaseConfig.g unset. docs/vp_aia.md derives Eq. (24) with "
+            "leave PhaseConfig.g unset. docs/vp_aia.md derives Eq. (14) with "
             "(P_n, Q_n) free in the plane, and does not cover a fixed gain."
         )
     if basis not in BASES:
@@ -306,28 +306,28 @@ def aia_variable_projection(stack: np.ndarray, g: np.ndarray, fit_gain: bool = F
     it = 0
 
     for it in range(rounds):
-        # Eq. (28): every round but the first re-linearizes about the
+        # Eq. (18): every round but the first re-linearizes about the
         # accumulated field, so what AIA sees is the remaining error only.
         I_lin = I if it == 0 else _relinearize(I, buffer, u, v, delta, g, alpha,
                                                modes, chunk, p.accum, xp)
 
         # Step 1: AIA baseline, a final pixel step at the converged (P_n, Q_n),
-        # and normalization. Eq. (20) needs the pixel-step residual, so the
+        # and normalization. Eq. (11) needs the pixel-step residual, so the
         # final pixel step is part of the algorithm, not a tidy-up.
         _, _, _, delta, g, aia_param = aia(I_lin.reshape(N, H, W), g, fit_gain=True,
                                            delta0=delta_start, iters=iters, tol=tol,
                                            precision=p)
         a0, u0, v0 = pixel_step(I_lin, delta, g, precision=p)
-        P_n = g * xp.cos(delta)                                           # (N,), Eq. (5)
+        P_n = g * xp.cos(delta)                                           # (N,), Eq. (2)
         Q_n = g * xp.sin(delta)
         a0, u0, v0, P_n, Q_n = normalize_quadrature_frame(a0, u0, v0, P_n, Q_n, xp,
                                                           precision=p)
 
-        # Steps 2-4: residual, projector, and the joint fit of Eq. (25).
+        # Steps 2-4: residual, projector, and the joint fit of Eq. (15).
         sol = fit_frame_and_coeffs(I_lin, a0, u0, v0, P_n, Q_n, modes, chunk=chunk,
                                    precision=p)
 
-        # Step 5: pixel corrections, Eq. (26), and the corrected fields, Eq. (27).
+        # Step 5: pixel corrections, Eq. (16), and the corrected fields, Eq. (17).
         a1, u1, v1 = _pixel_corrections(sol.alpha, u0, v0, P_n, Q_n, modes, p.accum, xp)
         a = (a0 + a1).astype(p.work, copy=False)
         u = (u0 + u1).astype(p.work, copy=False)
@@ -339,7 +339,7 @@ def aia_variable_projection(stack: np.ndarray, g: np.ndarray, fit_gain: bool = F
         delta = xp.arctan2(Q_n, P_n)                                      # delta[0] = 0
         g = xp.sqrt(P_n * P_n + Q_n * Q_n)                                # median(g) = 1
 
-        # The increments carry Eq. (13)'s two zero means, so the accumulated
+        # The increments carry Eq. (6)'s two zero means, so the accumulated
         # field keeps both conventions. The modes are orthonormal over the
         # field, so the RMS of this round's increment needs no (N, P) array.
         alpha = alpha + sol.alpha

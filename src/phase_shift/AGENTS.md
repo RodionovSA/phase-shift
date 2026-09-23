@@ -84,7 +84,7 @@ Rules for the `phase_shift` package. The root `AGENTS.md` still applies.
   behavior for users, not how the code came to be.
 - Keep docstrings small, NumPy-style: one-line summary, then `Parameters` /
   `Returns` / `Raises` with shapes and units. Refer to the docs for mathematics
-  and rationale, e.g. ``docs/aia.md`` Eq. (22) or §"Pixel step", instead of
+  and rationale, e.g. ``docs/aia.md`` Eq. (6) or §"Pixel step", instead of
   explaining it inline.
 - Never leave comments or docstring text about design decisions, alternatives
   tried, previous versions, or numerical verifications.

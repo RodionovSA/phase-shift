@@ -41,7 +41,7 @@ class MethodParam:
             Whether ``g`` was fitted jointly with the phase steps.
         noise_std : np.ndarray, shape (H, W)
             Per-pixel noise standard deviation ``sigma_0``,
-            ``docs/aia.md`` Eq. (32).
+            ``docs/aia_noise.md`` Eq. (16).
         simplified : bool
             Drop the corrections that are ``O(1/N_p)`` relative to the
             baseline.

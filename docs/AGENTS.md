@@ -7,6 +7,8 @@
 - `aia.md`: established, standalone AIA method built on that model. Read for
   AIA work and before studying the method below. AIA does not depend on
   SF-AIA.
+- `aia_noise.md`: phase-error covariance of the AIA solution, split from
+  `aia.md`. Read for noise and error-map work.
 - `sf_aia.md`: Spatial-Field AIA (SF-AIA), the user's own method, which uses AIA to recover
   spatially varying phase-step errors. This theory may still be revised through
   discussion with the user.

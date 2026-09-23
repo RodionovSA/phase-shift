@@ -2,8 +2,8 @@
 """Shared phase-error derivations for the AIA family.
 
 Computed from a method's output (``b, phi, delta, g``) rather than inside the
-solve: ``docs/aia.md`` §"Phase-error covariance" for the Eq. (26) baseline and
-the exact Stage-2/3 corrections, Eqs. (40) and (45); ``docs/sf_aia.md``
+solve: ``docs/aia_noise.md`` for the Eq. (10) baseline and
+the exact Stage-2/3 corrections, Eqs. (24) and (29); ``docs/sf_aia.md``
 §"Noise of the corrected solve" for the step-field term. Each method exposes
 its own map through :meth:`phase_shift.methods.base.MethodParam.phi_error`;
 the functions here are the pieces those share.
@@ -17,7 +17,7 @@ from .backend import Precision
 
 
 def _frame_side(delta: np.ndarray, g: np.ndarray, xp: ModuleType) -> tuple[np.ndarray, ...]:
-    """Frame-side quantities of ``docs/aia.md`` Eqs. (23)-(25) and (34).
+    """Frame-side quantities of ``docs/aia_noise.md`` Eqs. (7)-(9) and (18).
 
     All are ``(2, 2)`` or ``(2, N)`` and stay in float64 whatever the working
     dtype of the fields, as the methods' own normal-equation solves do.
@@ -32,33 +32,33 @@ def _frame_side(delta: np.ndarray, g: np.ndarray, xp: ModuleType) -> tuple[np.nd
     Returns
     -------
     C_inv : np.ndarray, shape (2, 2)
-        Inverse of Eq. (25)'s frame-side covariance.
+        Inverse of Eq. (9)'s frame-side covariance.
     k : np.ndarray, shape (2, N)
-        Eq. (34)'s leverage vectors, one column per frame.
+        Eq. (18)'s leverage vectors, one column per frame.
     w_n : np.ndarray, shape (2, N)
-        ``(-sin delta_n, cos delta_n)``, the tangential direction of Eq. (36).
+        ``(-sin delta_n, cos delta_n)``, the tangential direction of Eq. (20).
     """
     d = xp.stack([xp.cos(delta), xp.sin(delta)])                          # (2, N)
     w_n = xp.stack([-d[1], d[0]])                                         # (2, N)
     R = xp.mean(g[None, :] * d, axis=1)                                   # (2,)
     C = xp.mean(g[None, :] ** 2 * d[:, None, :] * d[None, :, :], axis=2) \
-        - xp.outer(R, R)                                                  # (2, 2), Eq. (25)
+        - xp.outer(R, R)                                                  # (2, 2), Eq. (9)
     C_inv = xp.linalg.pinv(C)
-    k = (C_inv @ (g[None, :] * d - R[:, None])) / delta.shape[0]          # (2, N), Eq. (34)
+    k = (C_inv @ (g[None, :] * d - R[:, None])) / delta.shape[0]          # (2, N), Eq. (18)
     return C_inv, k, w_n
 
 
 def _frame_step_weights(u: np.ndarray, v: np.ndarray, sigma0_sq: np.ndarray,
                         xp: ModuleType, acc: np.dtype
                         ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """``docs/aia.md`` Eq. (38): the frame step's per-pixel weight and its covariance.
+    """``docs/aia_noise.md`` Eq. (22): the frame step's per-pixel weight and its covariance.
 
     Parameters
     ----------
     u, v : np.ndarray, shape (H, W)
         Quadrature fields, ``docs/aia.md`` Eq. (2), in the working dtype.
     sigma0_sq : np.ndarray, shape (H, W)
-        Per-pixel noise variance, Eq. (32), in the working dtype.
+        Per-pixel noise variance, Eq. (16), in the working dtype.
     xp : module
     acc : dtype
         ``precision.accum``; the dtype the pixel sums accumulate in.
@@ -68,7 +68,7 @@ def _frame_step_weights(u: np.ndarray, v: np.ndarray, sigma0_sq: np.ndarray,
     l0, l1 : np.ndarray, shape (H, W)
         Components of ``ell(x, y)``, in the working dtype.
     M : np.ndarray, shape (2, 2), float64
-        ``sum ell ell^T sigma_0^2``, the ``{P, Q}`` block of Eq. (35).
+        ``sum ell ell^T sigma_0^2``, the ``{P, Q}`` block of Eq. (19).
     """
     ones = xp.ones((), dtype=acc)
     su = xp.sum(u, dtype=acc)
@@ -93,11 +93,11 @@ def aia_phi_error_parts(b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: np
                         fit_gain: bool, sigma0: np.ndarray, simplified: bool,
                         xp: ModuleType, precision: str | Precision | None = None
                         ) -> tuple[np.ndarray, np.ndarray]:
-    """``docs/aia.md``'s AIA phase-error map, exact to first order in the noise.
+    """The AIA phase-error map of ``docs/aia_noise.md``, exact to first order in the noise.
 
-    The Eq. (26) baseline when ``simplified``; otherwise Eq. (45) when the
-    gain was fitted with the steps, and Eq. (40) when only the steps were.
-    Returns Eq. (34)'s leverage vectors alongside, so a method that builds on
+    The Eq. (10) baseline when ``simplified``; otherwise Eq. (29) when the
+    gain was fitted with the steps, and Eq. (24) when only the steps were.
+    Returns Eq. (18)'s leverage vectors alongside, so a method that builds on
     this map does not rebuild them.
 
     Parameters
@@ -110,9 +110,9 @@ def aia_phi_error_parts(b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: np
         Whether ``g`` was fitted jointly with the steps: Stage 3 rather than
         Stage 2.
     sigma0 : np.ndarray, shape (H, W), or float
-        Per-pixel noise standard deviation, Eq. (32).
+        Per-pixel noise standard deviation, Eq. (16).
     simplified : bool
-        Return the Eq. (26) baseline alone, dropping the ``O(1/N_p)``
+        Return the Eq. (10) baseline alone, dropping the ``O(1/N_p)``
         fitted-step correction.
     xp : module
     precision : str or Precision, optional
@@ -123,7 +123,7 @@ def aia_phi_error_parts(b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: np
     phi_var : np.ndarray, shape (H, W)
         ``sigma_Phi(x, y)^2``, in squared radians.
     k : np.ndarray, shape (2, N), float64
-        Eq. (34)'s leverage vectors.
+        Eq. (18)'s leverage vectors.
     """
     work = b.dtype
     acc = Precision.of(precision).accum
@@ -136,28 +136,28 @@ def aia_phi_error_parts(b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: np
     b2 = xp.maximum(b ** 2, eps)
     w = xp.stack([xp.sin(phi), xp.cos(phi)])                              # (2, H, W)
 
-    # Eq. (26) split into its noise-free factor and sigma_0^2, so the
+    # Eq. (10) split into its noise-free factor and sigma_0^2, so the
     # Stage-2/3 corrections below need no division by the noise.
     unit_var = xp.einsum('ahw,ab,bhw->hw', w, C_inv.astype(work), w) / (N * b2)
     sigma0_sq = sigma0 ** 2
     if simplified:
         return unit_var * sigma0_sq, k
 
-    u = b * xp.cos(phi)                                                   # (H, W), Eq. (2)
+    u = b * xp.cos(phi)                                    # (H, W), docs/aia.md Eq. (2)
     v = -b * xp.sin(phi)
     l0, l1, M = _frame_step_weights(u, v, sigma0_sq * xp.ones_like(b), xp, acc)
     M_w = M.astype(work)
 
     # The correction is O(1/N_p), so it is accumulated on its own rather than
-    # as the `1 - 2 q.ell` factor of Eqs. (40)/(45), which would cancel away
+    # as the `1 - 2 q.ell` factor of Eqs. (24)/(29), which would cancel away
     # in the working dtype on a large field.
     if fit_gain:
-        # Eq. (45): Pi_n = I_2, so Gamma does not depend on the frame.
+        # Eq. (29): Pi_n = I_2, so Gamma does not depend on the frame.
         q_dot_l = u * l0 + v * l1
         qMq = (M_w[0, 0] * u + M_w[0, 1] * v) * u + (M_w[1, 0] * u + M_w[1, 1] * v) * v
         return unit_var * (sigma0_sq + (qMq - 2 * sigma0_sq * q_dot_l)), k
 
-    # Eq. (40) with Pi_n = w_n w_n^T: one frame at a time, no (N, H, W) array.
+    # Eq. (24) with Pi_n = w_n w_n^T: one frame at a time, no (N, H, W) array.
     w_n_w = w_n.astype(work)
     k_w = k.astype(work)
     mu = xp.einsum('an,ab,bn->n', w_n, M, w_n).astype(work)               # (N,), w_n^T M w_n
@@ -175,7 +175,7 @@ def _mode_quadratic_form(t: np.ndarray, basis_block: np.ndarray, weight: np.ndar
     """Per-pixel ``z' W z`` with ``z_(n,j) = t_n H_j``, on one pixel block.
 
     The quadratic form both step-field error models reduce to: ``docs/sf_aia.md``
-    Eq. (E7) and ``docs/vp_aia.md`` Eq. (29) differ in what ``t_n`` and ``W``
+    Eq. (E7) and ``docs/vp_aia.md`` Eq. (19) differ in what ``t_n`` and ``W``
     are, not in this contraction.
 
     Parameters
@@ -239,10 +239,11 @@ def step_field_phi_error(b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
     fit_gain : bool
         Whether ``g`` was fitted jointly with the steps.
     sigma0 : np.ndarray, shape (H, W), or float
-        Per-pixel noise standard deviation, ``docs/aia.md`` Eq. (32).
+        Per-pixel noise standard deviation, ``docs/aia_noise.md`` Eq. (16).
     simplified : bool
-        Return the Eq. (26) baseline alone, dropping both the fitted-step
-        correction and the step-field term; both are ``O(1/N_p)``.
+        Return the ``docs/aia_noise.md`` Eq. (10) baseline alone, dropping
+        both the fitted-step correction and the step-field term; both are
+        ``O(1/N_p)``.
     basis : np.ndarray, shape (J, P)
         The step field's basis, from :func:`phase_shift.basis.spatial_basis`.
         An empty basis reduces this to the plain-``aia`` result.
@@ -309,7 +310,7 @@ def step_field_phi_error(b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
     G_inv = xp.linalg.pinv(G)                                             # (N, J, J)
     K = xp.einsum('nja,namb,mbk->njmk', G_inv, DLD.reshape(N, J, N, J), G_inv)
 
-    # Pi removes from a column over frames its pixel-step fit, docs/vp_aia.md Eq. (18).
+    # Pi removes from a column over frames its pixel-step fit, docs/vp_aia.md Eq. (10).
     A = xp.stack([xp.ones(N, dtype=xp.float64), P_n, Q_n], axis=1)        # (N, 3)
     Pi = xp.eye(N, dtype=xp.float64) - A @ xp.linalg.pinv(A.T @ A) @ A.T  # (N, N)
     weight = (Pi[:, None, :, None] * K).reshape(N * J, N * J).astype(acc)  # (N*J, N*J)
@@ -335,11 +336,11 @@ def vp_phi_error(b: np.ndarray, phi: np.ndarray, P_n: np.ndarray, Q_n: np.ndarra
                  sigma0: np.ndarray, simplified: bool, beta_cov_unit: np.ndarray,
                  basis: np.ndarray, xp: ModuleType, chunk: int = 65_536,
                  precision: "str | Precision | None" = None) -> np.ndarray:
-    """VP-AIA's phase-error map, ``docs/vp_aia.md`` Eq. (29).
+    """VP-AIA's phase-error map, ``docs/vp_aia.md`` Eq. (19).
 
     The pixel-step variance ``sigma_0^2 sum_n s_n^2`` plus the variance the
     fitted step field adds, §"Effect on the phase". The second term is the
-    quadratic form of Eq. (29) in the coefficient block of the fitted
+    quadratic form of Eq. (19) in the coefficient block of the fitted
     covariance; its ``gamma`` is zero at the positions of ``P_n^(1)`` and
     ``Q_n^(1)``, so only that block is touched.
 
@@ -348,12 +349,12 @@ def vp_phi_error(b: np.ndarray, phi: np.ndarray, P_n: np.ndarray, Q_n: np.ndarra
     b, phi : np.ndarray, shape (H, W)
         Fitted fringe amplitude and phase in radians.
     P_n, Q_n : np.ndarray, shape (N,)
-        Fitted per-frame coefficients, ``docs/vp_aia.md`` Eq. (5).
+        Fitted per-frame coefficients, ``docs/vp_aia.md`` Eq. (3).
     sigma0 : np.ndarray, shape (H, W), or float
-        Per-pixel noise standard deviation, ``docs/aia.md`` Eq. (32).
+        Per-pixel noise standard deviation, ``docs/aia_noise.md`` Eq. (16).
     simplified : bool
         Return the pixel-step term alone, dropping the ``O(J/K)`` correction
-        of Eq. (30).
+        of Eq. (20).
     beta_cov_unit : np.ndarray, shape (2N+NJ, 2N+NJ)
         Covariance of the fitted unknowns per unit ``sigma_0^2``, from
         :class:`phase_shift.methods.vp_system.VPSolution`.
@@ -369,7 +370,7 @@ def vp_phi_error(b: np.ndarray, phi: np.ndarray, P_n: np.ndarray, Q_n: np.ndarra
     -----
     ``beta_cov_unit`` is derived for noise of one variance across the field,
     so a spatially varying ``sigma0`` scales the second term pixel by pixel
-    rather than re-weighting the fit. §"Noise of the zeroth-order steps"
+    rather than re-weighting the fit. §"Noise of the baseline steps"
     leaves the cross-correlation with the zeroth-order step noise underived;
     the two terms are added, as in ``docs/sf_aia.md`` Eq. (E9).
 
@@ -385,7 +386,7 @@ def vp_phi_error(b: np.ndarray, phi: np.ndarray, P_n: np.ndarray, Q_n: np.ndarra
     Q_n = xp.asarray(Q_n, dtype=xp.float64)
 
     A = xp.stack([xp.ones(N, dtype=xp.float64), P_n, Q_n], axis=1)        # (N, 3)
-    A_p_inv = xp.linalg.pinv(A.T @ A)                                     # (3, 3), Eq. (7)
+    A_p_inv = xp.linalg.pinv(A.T @ A)                                     # (3, 3), Eq. (4)
     e1 = A @ A_p_inv[:, 1]                                                # (N,)
     e2 = A @ A_p_inv[:, 2]
 
@@ -415,7 +416,7 @@ def vp_phi_error(b: np.ndarray, phi: np.ndarray, P_n: np.ndarray, Q_n: np.ndarra
     extra = xp.empty(P_tot, dtype=acc)
     for start in range(0, P_tot, chunk):
         sl = slice(start, min(start + chunk, P_tot))
-        # t_n = s_n w_n, with w_n = P_n v - Q_n u of Eq. (17).
+        # t_n = s_n w_n, with w_n = P_n v - Q_n u of Eq. (9).
         s_n = (e1_a[:, None] * v[None, sl] - e2_a[:, None] * u[None, sl]) / b2[None, sl]
         w_n = P_a[:, None] * v[None, sl] - Q_a[:, None] * u[None, sl]
         extra[sl] = _mode_quadratic_form(s_n * w_n, basis[:, sl], weight, xp)

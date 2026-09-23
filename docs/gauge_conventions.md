@@ -40,13 +40,13 @@ a family supplies, and the second constrains the fitted coefficients.
 Theory only: no method is registered for it, so the `Where` column cites
 `vp_aia.md` alone. VP-AIA fixes the same phase-step split as SF-AIA, and adds
 conventions for the four AIA parametrization freedoms; the normalization steps
-below are those of §"Pixel corrections and normalization", applied both to the
+below are those of Appendix D §"Normalization", applied both to the
 zeroth-order solution and to the corrected fields.
 
 | Freedom | Convention | Where |
 |---|---|---|
 | A spatially uniform part of `Δ_n` is indistinguishable from the piston `δ_n` | `⟨Δ_n⟩_{x,y} = 0`, the uniform part assigned to `δ_n` | §"Gauge conventions"; `interference_model.md` Eq. 9a |
-| A pattern shared by all frames is indistinguishable from the static phase `Φ` | `⟨Δ_n(x,y)⟩_n = 0`, the shared pattern assigned to `Φ`; equivalently `⟨α_nj⟩_n = 0` for the mode amplitudes | §"Gauge conventions", Eq. 13; `interference_model.md` Eq. 9b |
+| A pattern shared by all frames is indistinguishable from the static phase `Φ` | `⟨Δ_n(x,y)⟩_n = 0`, the shared pattern assigned to `Φ`; equivalently `⟨α_nj⟩_n = 0` for the mode amplitudes | §"Gauge conventions", Eq. 6; `interference_model.md` Eq. 9b |
 | `(Φ, δ_n) → (Φ−c, δ_n+c)` | `δ_1 = 0`, as a rotation of `(P_n,Q_n)` and `(u,v)` | §"Gauge conventions"; normalization step 3 |
 | `g_n·b` scale | `median(g_n) = 1`, with `s = median_n hypot(P_n,Q_n)` — the same convention as `aia.md` Eq. 16 | §"Gauge conventions"; normalization step 4 |
 | With `g_n` free, `(u,v) → T(u,v)`, `(P_n,Q_n) → T^{-⊤}(P_n,Q_n)` for invertible `T`, plus the shifts `(P_n,Q_n) → (P_n+p, Q_n+q)`, `a → a−pu−qv` | Shifts fixed by the scalar intercept: `Σ(a−ā)u = Σ(a−ā)v = 0`. Shear and anisotropic scaling fixed by whitening `(u,v)` after every pixel step: `Σu² = Σv²`, `Σu·v = 0`. The remaining rotations, reflections, and common scalings follow from `δ_1 = 0`, the step direction, and `⟨g_n⟩_n = 1`. | §"Quadrature frame"; normalization steps 1–2 |

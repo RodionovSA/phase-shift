@@ -615,7 +615,7 @@ class TestGaugeConventions:
         assert abs(float(np.median(np.hypot(P_n, Q_n))) - 1.0) < 1e-12   # step 4
 
     def test_normalize_quadrature_frame_preserves_the_model(self):
-        # Every step is a reparametrization of docs/vp_aia.md Eq. (5).
+        # Every step is a reparametrization of docs/vp_aia.md Eq. (3).
         a, u, v, P_n, Q_n = _quadrature_case()
         before = a[None, :] + np.outer(P_n, u) + np.outer(Q_n, v)
         out = normalize_quadrature_frame(a, u, v, P_n, Q_n, np)
@@ -686,7 +686,7 @@ class TestMethodParamDefaults:
 
 class TestPhaseError:
     def test_ideal_configuration_matches_closed_form(self):
-        """Eq. (26) reduces to Eq. (30) for evenly spaced steps and unit gain."""
+        """Eq. (10) reduces to Eq. (14) for evenly spaced steps and unit gain."""
         from phase_shift.errors import aia_phi_error_parts
 
         N, H, W = 7, 12, 10
@@ -698,12 +698,12 @@ class TestPhaseError:
         sigma0 = np.full((H, W), 0.02)
 
         phi_var, _ = aia_phi_error_parts(b, phi, delta, g, False, sigma0, True, np)
-        expected = (2.0 / N) * (sigma0 / b) ** 2                  # Eq. (30)
+        expected = (2.0 / N) * (sigma0 / b) ** 2                  # Eq. (14)
         assert np.allclose(phi_var, expected, rtol=1e-10)
 
     @pytest.mark.parametrize("fit_gain,coeff", [(False, -1.5), (True, -2.0)])
     def test_ideal_fitted_step_correction_matches_documented_coefficient(self, fit_gain, coeff):
-        """Eqs. (41)/(46): the ideal-case reading of the exact Eqs. (40)/(45)."""
+        """Eqs. (25)/(30): the ideal-case reading of the exact Eqs. (24)/(29)."""
         from phase_shift.errors import aia_phi_error_parts
 
         N, H, W = 7, 16, 16
@@ -720,7 +720,7 @@ class TestPhaseError:
         assert np.allclose(measured, coeff, atol=1e-9)
 
     def test_correction_scales_as_one_over_pixel_count(self):
-        """The fitted-step term of Eqs. (40)/(45) is O(1/N_p)."""
+        """The fitted-step term of Eqs. (24)/(29) is O(1/N_p)."""
         from phase_shift.errors import aia_phi_error_parts
 
         N = 7
@@ -801,7 +801,7 @@ def _vp_case(H=40, W=50, N=9, seed=31, degree=1, amp=0.02, dtype=np.float64):
     """A stack with a planted first-order step field, already in the conventional frame.
 
     Returns the flattened fields VP-AIA's first-order pass takes as input,
-    together with the planted `alpha` (docs/vp_aia.md Eq. 13).
+    together with the planted `alpha` (docs/vp_aia.md Eq. 6).
     """
     rng = np.random.default_rng(seed)
     yy, xx = np.mgrid[0:H, 0:W]
@@ -814,12 +814,12 @@ def _vp_case(H=40, W=50, N=9, seed=31, degree=1, amp=0.02, dtype=np.float64):
     g /= np.median(g)
     basis = spatial_basis(H, W, "poly", np, degree=degree)
     alpha = rng.standard_normal((N, basis.shape[0])) * amp * np.sqrt(H * W)
-    alpha -= alpha.mean(0)                                   # Eq. (24)
+    alpha -= alpha.mean(0)                                   # Eq. (14)
     Delta = alpha @ basis                                    # (N, P)
     stack = (a[None] + g[:, None] * b[None]
              * np.cos(phi[None] + delta[:, None] + Delta)).astype(dtype)
     # Zeroth order as docs/vp_aia.md §"VP-AIA algorithm" step 1 builds it: a
-    # pixel step at the true (P_n, Q_n), then normalization. Eq. (20) needs the
+    # pixel step at the true (P_n, Q_n), then normalization. Eq. (11) needs the
     # pixel-step residual, not just fields that fit.
     P_n, Q_n = g * np.cos(delta), g * np.sin(delta)
     a0, u0, v0 = pixel_step(stack, delta, g, precision="double")
@@ -828,7 +828,7 @@ def _vp_case(H=40, W=50, N=9, seed=31, degree=1, amp=0.02, dtype=np.float64):
 
 
 class TestVPSystem:
-    """`docs/vp_aia.md` Eqs. (22)-(25), the first-order normal system."""
+    """`docs/vp_aia.md` Eqs. (13)-(15), the first-order normal system."""
 
     def test_recovers_planted_coefficients(self):
         stack, a, u, v, P_n, Q_n, basis, alpha_true = _vp_case()
@@ -837,7 +837,7 @@ class TestVPSystem:
         assert rel < 1e-2, rel
 
     def test_unfitted_fields_are_rejected_by_the_math(self):
-        # Eq. (21) assumes Pi leaves the residual unchanged, which holds only
+        # Eq. (12) assumes Pi leaves the residual unchanged, which holds only
         # for the pixel-step residual. Fields that merely fit the data -- here
         # the exact truth -- break the fit, so the docstring's precondition is
         # a real one, not a formality.
@@ -881,8 +881,8 @@ class TestVPSystem:
             assert np.max(np.abs(got - ref)) < 1e-10 * np.max(np.abs(ref))
 
     def test_conditioning_does_not_track_the_pixel_count(self):
-        # Regression: the modes are solved in Eq. (30)'s <H_j H_k> = delta
-        # convention and Eq. (24)'s rows are weighted to M's scale. Without
+        # Regression: the modes are solved in Eq. (20)'s <H_j H_k> = delta
+        # convention and Eq. (14)'s rows are weighted to M's scale. Without
         # either, kappa_vp grew linearly with K and reported the frame size
         # rather than the quality of the fit.
         kappas = []
@@ -893,7 +893,7 @@ class TestVPSystem:
         assert max(kappas) / min(kappas) < 2.0, kappas   # K grew 16x
 
     def test_projector_identities(self):
-        # docs/vp_aia.md Eq. (18): Pi A = 0, Pi^2 = Pi, rank N-3.
+        # docs/vp_aia.md Eq. (10): Pi A = 0, Pi^2 = Pi, rank N-3.
         rng = np.random.default_rng(5)
         N = 8
         P_n, Q_n = rng.standard_normal(N), rng.standard_normal(N)
@@ -938,7 +938,7 @@ def make_vp_stack(H=90, W=110, N=12, seed=11, amp=0.03, degree=1, dtype=np.float
     """Stack whose phase step carries a first-order spatial error on top of the piston.
 
     Built from the same mode family VP-AIA fits, with `docs/vp_aia.md`
-    Eq. (13)'s zero frame mean, so the planted field is exactly representable.
+    Eq. (6)'s zero frame mean, so the planted field is exactly representable.
     """
     rng = np.random.default_rng(seed)
     K = H * W
@@ -952,7 +952,7 @@ def make_vp_stack(H=90, W=110, N=12, seed=11, amp=0.03, degree=1, dtype=np.float
     g /= np.median(g)
     basis = spatial_basis(H, W, "poly", np, degree=degree)
     alpha = rng.standard_normal((N, basis.shape[0])) * amp * np.sqrt(K)
-    alpha -= alpha.mean(0)                                   # Eq. (24)
+    alpha -= alpha.mean(0)                                   # Eq. (14)
     Delta = (alpha @ basis).reshape(N, H, W)
     stack = (a[None] + g[:, None, None] * b[None]
              * np.cos(phi[None] + delta[:, None, None] + Delta))
@@ -985,7 +985,7 @@ class TestVPAIA:
         assert rel < 0.1, rel
 
     def test_step_field_keeps_both_zero_means(self):
-        # docs/vp_aia.md Eq. (13): <H_j>_xy = 0 by construction, and Eq. (24)
+        # docs/vp_aia.md Eq. (6): <H_j>_xy = 0 by construction, and Eq. (14)
         # supplies <alpha_nj>_n = 0.
         stack, truth = make_vp_stack()
         r = self._solve(stack, "vp_aia", basis_kwargs={"degree": 2}, crop=10)
@@ -996,7 +996,7 @@ class TestVPAIA:
         assert np.max(np.abs(spatial_mean)) < 1e-9
 
     def test_fixed_gain_raises(self):
-        # docs/vp_aia.md derives Eq. (24) with (P_n, Q_n) free; the fixed-gain
+        # docs/vp_aia.md derives Eq. (14) with (P_n, Q_n) free; the fixed-gain
         # case is not derived, so the method refuses rather than inventing it.
         stack, _ = make_vp_stack()
         for cfg in (PhaseConfig(method="vp_aia", gain_mode="none"),
@@ -1021,7 +1021,7 @@ class TestVPAIA:
     def test_kappa_fit_is_the_joint_system(self):
         stack, _ = make_vp_stack()
         r = self._solve(stack, "vp_aia", basis_kwargs={"degree": 1}, crop=10)
-        # The one system of Eq. (25), not a per-frame value: O(100), and it
+        # The one system of Eq. (15), not a per-frame value: O(100), and it
         # does not track the pixel count.
         assert 1.0 < r.method_param.kappa_fit < 1e3
 
@@ -1041,11 +1041,11 @@ class TestVPAIA:
 
 
 def make_uniform_case(H=80, W=90, N=9, deg=1, seed=4, amp=0.01):
-    """A stack meeting the four conditions of `docs/vp_aia.md` Eq. (30).
+    """A stack meeting the four conditions of `docs/vp_aia.md` Eq. (20).
 
     Uniform steps with `N >= 5`, constant `g_n` and `b`, many fringes, and the
-    orthonormal modes `spatial_basis` already provides -- so Eq. (29) should
-    reduce to Eq. (30)'s `1 + J/K`.
+    orthonormal modes `spatial_basis` already provides -- so Eq. (19) should
+    reduce to Eq. (20)'s `1 + J/K`.
     """
     rng = np.random.default_rng(seed)
     K = H * W
@@ -1064,7 +1064,7 @@ def make_uniform_case(H=80, W=90, N=9, deg=1, seed=4, amp=0.01):
 
 
 class TestVPPhaseError:
-    """`docs/vp_aia.md` Eq. (29), VP-AIA's phase-error map."""
+    """`docs/vp_aia.md` Eq. (19), VP-AIA's phase-error map."""
 
     @staticmethod
     def _fit(stack, deg, crop=5, precision="double"):
@@ -1074,8 +1074,8 @@ class TestVPPhaseError:
         return PhaseSolver(cfg, precision=precision).fit(stack).result
 
     def test_first_term_is_aia_eq26(self):
-        # docs/vp_aia.md §"Noise of the zeroth-order steps": "The first term of
-        # Eq. (29) is aia.md Eq. (26)". With no modes the two must agree
+        # docs/vp_aia.md §"Noise of the baseline steps": "The first term of
+        # Eq. (19) is aia_noise.md Eq. (10)". With no modes the two must agree
         # exactly, which pins the s_n derivation.
         stack, _, _, _ = make_uniform_case(H=60, W=70)
         r = self._fit(stack, 1)
@@ -1099,7 +1099,7 @@ class TestVPPhaseError:
 
     def test_reduces_to_eq30_under_its_four_conditions(self):
         # Uniform steps, constant g_n and b, many fringes, orthonormal modes:
-        # Eq. (29) must give Eq. (30)'s 1 + J/K.
+        # Eq. (19) must give Eq. (20)'s 1 + J/K.
         for H, W, N, deg in ((80, 90, 9, 1), (80, 90, 9, 2), (120, 130, 13, 2)):
             stack, _, J, K = make_uniform_case(H=H, W=W, N=N, deg=deg)
             r = self._fit(stack, deg)
@@ -1139,7 +1139,7 @@ class TestVPPhaseError:
 
 
 class TestVPRelinearization:
-    """`docs/vp_aia.md` Eq. (28), the relinearization loop."""
+    """`docs/vp_aia.md` Eq. (18), the relinearization loop."""
 
     @staticmethod
     def _solve(stack, rounds, round_tol=1e-12, deg=1):
@@ -1162,7 +1162,7 @@ class TestVPRelinearization:
 
     def test_extra_rounds_help_when_the_field_is_large(self):
         # A single pass is first order in Delta_n, so a large field leaves a
-        # second-order error that Eq. (28) is there to remove.
+        # second-order error that Eq. (18) is there to remove.
         stack, phi_t, _, _ = make_uniform_case(H=50, W=56, N=9, amp=0.12)
         one = circ_rms_deg(self._solve(stack, 1).phi, phi_t)
         many = circ_rms_deg(self._solve(stack, 5).phi, phi_t)

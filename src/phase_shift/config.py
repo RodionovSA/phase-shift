@@ -35,11 +35,11 @@ class PhaseConfig:
         ``"aia"``.
     noise_std : np.ndarray, shape (H, W), optional
         Per-pixel camera noise standard deviation ``sigma_0``,
-        ``docs/aia.md`` Eq. (32). Defaults to the per-pixel RMS fit residual.
+        ``docs/aia_noise.md`` Eq. (16). Defaults to the per-pixel RMS fit residual.
     phi_error_simplified : bool, default True
         Compute ``PhaseResult.phi_error`` for known steps and gains,
-        ``docs/aia.md`` Eq. (26). If False, add the exact correction for the
-        steps and gains the method fitted, ``docs/aia.md`` Eq. (40) or (45),
+        ``docs/aia_noise.md`` Eq. (10). If False, add the exact correction for the
+        steps and gains the method fitted, ``docs/aia_noise.md`` Eq. (24) or (29),
         and for ``"sf_aia"`` the step field's own term, ``docs/sf_aia.md``
         Eq. (E9). The correction is ``O(1/N_p)``, so it matters on a small
         region and not on a full frame.

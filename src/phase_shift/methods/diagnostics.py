@@ -30,7 +30,7 @@ class AIAParam(MethodParam):
         loop reports convergence.
     predicted_rms : float
         Predicted RMS phase error, in radians, ``docs/aia.md`` Eq. (11). An
-        empirical fit; §"Phase-error covariance" gives the exact expression,
+        empirical fit; ``docs/aia_noise.md`` gives the exact expression,
         reported as :attr:`phase_shift.result.PhaseResult.phi_error`.
     iters_run : int
         Number of alternating least-squares iterations run.
@@ -64,7 +64,7 @@ class AIAParam(MethodParam):
     def phi_error(self, b: np.ndarray, phi: np.ndarray, delta: np.ndarray, g: np.ndarray,
                   fit_gain: bool, noise_std: np.ndarray, simplified: bool,
                   xp: ModuleType) -> np.ndarray:
-        """Return ``sigma_Phi`` of ``docs/aia.md`` §"Phase-error covariance".
+        """Return ``sigma_Phi`` of ``docs/aia_noise.md``.
 
         See :meth:`phase_shift.methods.base.MethodParam.phi_error` for the
         arguments.

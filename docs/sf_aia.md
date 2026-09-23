@@ -211,13 +211,13 @@ Eq. (E1) uses only the first-order model. Each round corrects the data and re-so
 
 ## Noise of the corrected solve
 
-Consider noise $\varepsilon_n(x,y)$ with variance $\sigma_0^2(x,y)$, independent across frames and pixels but not of equal size across the field (`aia.md`, Eqs. 17 and 32), and exact $P_n,Q_n$. At one pixel, the pixel-step estimate of $\Phi$ is linear in the intensity column. By Eqs. (T10) and (T15), its error is $\sum_ns_n\varepsilon_n$ with
+Consider noise $\varepsilon_n(x,y)$ with variance $\sigma_0^2(x,y)$, independent across frames and pixels but not of equal size across the field (`aia_noise.md`, Eqs. 1 and 16), and exact $P_n,Q_n$. At one pixel, the pixel-step estimate of $\Phi$ is linear in the intensity column. By Eqs. (T10) and (T15), its error is $\sum_ns_n\varepsilon_n$ with
 
 $$\begin{pmatrix}s_1\\\vdots\\s_N\end{pmatrix}=AA_p^{-1}\begin{pmatrix}0\\-\sin\Phi/b\\-\cos\Phi/b\end{pmatrix},$$
 
 so plain AIA gives $\sigma_\Phi^2=\sigma_0^2\sum_ns_n^2$.
 
-**Noise in the fitted field.** Let $\Pi=I-AA_p^{-1}A^\top$ be the $N\times N$ matrix that removes from a column over frames its pixel-step fit (`vp_aia.md`, Eq. 18). The residual noise at each pixel is $\Pi(\varepsilon_1,\dots,\varepsilon_N)^\top$, and Eq. (E1) maps the residual noise of frame $n$ to coefficient errors through $-\big(G^{(n)}\big)^{-1}D_n^\top$. The correction adds $w_np^\top(c_{1n},\dots,c_{Jn})^\top$ to frame $n$, where $p=(p_1,\dots,p_J)^\top$ at the pixel. Since $(s_1,\dots,s_N)^\top$ lies in the column space of $A$, $\Pi$ removes it, and the added term is uncorrelated with the phase error $\sum_ns_n\varepsilon_n$ of the same pixel. The correction therefore cannot reduce the noise; it adds a variance term:
+**Noise in the fitted field.** Let $\Pi=I-AA_p^{-1}A^\top$ be the $N\times N$ matrix that removes from a column over frames its pixel-step fit (`vp_aia.md`, Eq. 10). The residual noise at each pixel is $\Pi(\varepsilon_1,\dots,\varepsilon_N)^\top$, and Eq. (E1) maps the residual noise of frame $n$ to coefficient errors through $-\big(G^{(n)}\big)^{-1}D_n^\top$. The correction adds $w_np^\top(c_{1n},\dots,c_{Jn})^\top$ to frame $n$, where $p=(p_1,\dots,p_J)^\top$ at the pixel. Since $(s_1,\dots,s_N)^\top$ lies in the column space of $A$, $\Pi$ removes it, and the added term is uncorrelated with the phase error $\sum_ns_n\varepsilon_n$ of the same pixel. The correction therefore cannot reduce the noise; it adds a variance term:
 
 $$\sigma_\Phi^2=\sigma_0^2\sum_ns_n^2+\sum_{n,m}t_nt_m\,\Pi_{nm}\,p^\top\big(G^{(n)}\big)^{-1}D_n^\top\Lambda D_m\big(G^{(m)}\big)^{-1}p,\qquad\Lambda=\operatorname{diag}\big(\sigma_0^2(x,y)\big),\tag{E7}$$
 
@@ -234,18 +234,18 @@ Equation (E8) is a reading of Eq. (E7) under the four conditions above, not a su
 
 ### Composition with the fitted-step error
 
-Equation (E7) holds $P_n$ and $Q_n$ at their true values. Their own noise is the subject of `aia.md` §"Phase-error covariance", whose Eqs. (40) and (45) give the exact per-pixel phase variance when $\delta_n$, or $\delta_n$ and $g_n$, is fitted from the same frames. Both are first-order in the same noise and are built on the same $(u,v)$, and they describe displacements of $\Phi$ from different sources — a perturbed pixel-step design, and a fitted step field — so the SF-AIA phase variance is
+Equation (E7) holds $P_n$ and $Q_n$ at their true values. Their own noise is the subject of `aia_noise.md`, whose Eqs. (24) and (29) give the exact per-pixel phase variance when $\delta_n$, or $\delta_n$ and $g_n$, is fitted from the same frames. Both are first-order in the same noise and are built on the same $(u,v)$, and they describe displacements of $\Phi$ from different sources — a perturbed pixel-step design, and a fitted step field — so the SF-AIA phase variance is
 
-$$\sigma_\Phi^2=\sigma_\Phi^2\Big|_{\texttt{aia.md}\ \text{Eq. (40) or (45)}}
+$$\sigma_\Phi^2=\sigma_\Phi^2\Big|_{\texttt{aia\_noise.md}\ \text{Eq. (24) or (29)}}
 +\sum_{n,m}t_nt_m\,\Pi_{nm}\,p^\top\big(G^{(n)}\big)^{-1}D_n^\top\Lambda D_m\big(G^{(m)}\big)^{-1}p.\tag{E9}$$
 
-The first term reduces to `aia.md` Eq. (26) when the steps are known, so Eq. (E9) contains the plain-AIA result as its own special case at $J=0$.
+The first term reduces to `aia_noise.md` Eq. (10) when the steps are known, so Eq. (E9) contains the plain-AIA result as its own special case at $J=0$.
 
 ### Validity
 
 Equation (E9) is a sum of two exact terms with a third omitted. Their cross-correlation is not derived here: the step-field fit is driven by $\Pi\varepsilon$, which the pixel step removes, while $e_{\delta_n}$ comes from the frame step's regression on $(1,u,v)$ across pixels, and those two projections are not orthogonal in general. The omitted term is $O(1/N_p)$, the same order as either of the two kept.
 
-Both terms are first order in the noise and describe one corrected pass taken from the true fields, so they carry the conditions of `aia.md` §"Validity" unchanged: they are variances about each estimator's own mean, in the gauge where $\Phi$ is free up to one additive constant.
+Both terms are first order in the noise and describe one corrected pass taken from the true fields, so they carry the conditions of `aia_noise.md` §"Validity" unchanged: they are variances about each estimator's own mean, in the gauge where $\Phi$ is free up to one additive constant.
 
 Equation (E9) is also a single pass, and the refinement loop of §"Algorithm" does not leave it where it is. Each round removes part of the bias of §"Bias of a single pass", and with it part of the attenuation that kept the one-pass noise small, so the added variance grows round by round. It passes the $J/N_p$ of `vp_aia.md` Eq. (30) — the level of the unbiased one-pass estimator — after about three rounds and keeps rising, because the alternation's fixed point is not the joint least-squares solution that Eq. (30) describes. Equation (E9) is therefore a floor for a solve that has run several rounds, not an estimate of it, and the loop's own fixed point is not derived here. This is why the algorithm reports the best-scoring round rather than the last.
 

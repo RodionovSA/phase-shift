@@ -171,7 +171,7 @@ def normalize_quadrature_frame(a: np.ndarray, u: np.ndarray, v: np.ndarray,
         sum((a - mean(a)) * u) == sum((a - mean(a)) * v) == 0
         sum(u**2) == sum(v**2),  sum(u*v) == 0
 
-    Every step is a reparametrization of ``docs/vp_aia.md`` Eq. (5), so
+    Every step is a reparametrization of ``docs/vp_aia.md`` Eq. (3), so
     ``a + P_n u + Q_n v`` is unchanged.
 
     Parameters
@@ -179,7 +179,7 @@ def normalize_quadrature_frame(a: np.ndarray, u: np.ndarray, v: np.ndarray,
     a, u, v : np.ndarray, shape (P,)
         Background and quadrature fields, flattened.
     P_n, Q_n : np.ndarray, shape (N,)
-        Per-frame quadrature coefficients, ``docs/vp_aia.md`` Eq. (5):
+        Per-frame quadrature coefficients, ``docs/vp_aia.md`` Eq. (3):
         ``P_n = g_n cos(delta_n)``, ``Q_n = g_n sin(delta_n)``.
     xp : module
         ``numpy`` or ``cupy``, matching the inputs.

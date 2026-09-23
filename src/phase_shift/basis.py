@@ -4,7 +4,7 @@
 The field is expanded as ``Delta_n = sum_j c_jn * p_j``,
 ``docs/interference_model.md`` Eq. (9b) and ``docs/sf_aia.md`` Eq. (T1). Every
 family is centered and orthonormalized here, so each basis function has zero
-spatial mean (Eq. 9a, Eq. T3) whatever the family. ``docs/vp_aia.md`` Eq. (13)
+spatial mean (Eq. 9a, Eq. T3) whatever the family. ``docs/vp_aia.md`` Eq. (6)
 uses the same functions as its modes ``H_j``.
 
 Add a family by registering one builder of its raw functions in
