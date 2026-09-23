@@ -5,23 +5,19 @@
 - `interference_model.md`: established physical model and shared definitions.
   Read first for mathematical work.
 - `aia.md`: established, standalone AIA method built on that model. Read for
-  AIA work and before studying the method below. AIA does not depend on
-  SF-AIA.
+  AIA work and before studying the method below.
 - `aia_noise.md`: phase-error covariance of the AIA solution, split from
   `aia.md`. Read for noise and error-map work.
-- `sf_aia.md`: Spatial-Field AIA (SF-AIA), the user's own method, which uses AIA to recover
-  spatially varying phase-step errors. This theory may still be revised through
-  discussion with the user.
 - `vp_aia.md`: Variable-Projection AIA (VP-AIA), the user's own method, which
   recovers spatially varying phase-step errors as a first-order correction to
   AIA in one pass. This theory may still be revised through discussion with the
   user.
 
 The first two documents are settled foundations. Do not revise their mathematics
-without explicit agreement; discuss proposed SF-AIA or VP-AIA changes before
-updating their theory and implementation. Both of the user's methods are
-implemented (`methods/sf_aia.py`, `methods/vp_aia.py` with `methods/vp_system.py`),
-so revising either theory means revising code that follows it.
+without explicit agreement; discuss proposed VP-AIA changes before updating its
+theory and implementation. VP-AIA is implemented (`methods/vp_aia.py` with
+`methods/vp_system.py`), so revising its theory means revising the code that
+follows it.
 
 ## Reading rules
 

@@ -62,7 +62,7 @@ class MethodParam:
         This is the phase step of ``docs/interference_model.md`` Eq. (17).
         Broadcasting ``delta`` alone is its uniform-piston limit, Eq. (20); a
         method that recovers a spatially varying step overrides this, e.g.
-        :class:`phase_shift.methods.sf_aia.StepFieldParam`.
+        :class:`phase_shift.methods.step_field.StepFieldParam`.
 
         Parameters
         ----------

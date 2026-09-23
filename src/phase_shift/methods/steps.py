@@ -4,7 +4,7 @@
 The pixel step solves every pixel's ``(a, u, v)`` with the phase steps fixed
 (§"Pixel step", Eq. 5-6); the frame step solves every frame's
 ``(c_n, P_n, Q_n)`` with the fields fixed (§"Frame step", Eq. 7-9). Alternating
-them is AIA; SF-AIA and VP-AIA reuse both.
+them is AIA; VP-AIA reuses both.
 """
 
 from types import ModuleType

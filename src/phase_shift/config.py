@@ -40,8 +40,8 @@ class PhaseConfig:
         Compute ``PhaseResult.phi_error`` for known steps and gains,
         ``docs/aia_noise.md`` Eq. (10). If False, add the exact correction for the
         steps and gains the method fitted, ``docs/aia_noise.md`` Eq. (24) or (29),
-        and for ``"sf_aia"`` the step field's own term, ``docs/sf_aia.md``
-        Eq. (E9). The correction is ``O(1/N_p)``, so it matters on a small
+        and for ``"vp_aia"`` the step field's own term, ``docs/vp_aia.md``
+        Eq. (19). The correction is ``O(1/N_p)``, so it matters on a small
         region and not on a full frame.
 
     Raises

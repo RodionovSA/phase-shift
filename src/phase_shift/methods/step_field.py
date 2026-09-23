@@ -4,7 +4,7 @@
 A method that expands the step field on a spatial basis reports its
 coefficients through :class:`StepFieldParam` and scores them with
 :func:`step_field_quality`; neither depends on how the coefficients were
-fitted. See ``docs/sf_aia.md`` §"Algorithm" and ``docs/vp_aia.md``.
+fitted. See ``docs/vp_aia.md``.
 """
 
 from dataclasses import dataclass
@@ -26,8 +26,7 @@ def step_field_quality(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.nd
                        ) -> tuple[float, np.ndarray]:
     """Score how much of the residual the fitted step field explains.
 
-    Step 4 of ``docs/sf_aia.md`` §"Algorithm": rebuild every frame at the
-    corrected step ``delta_n + Delta_n`` and compare the residual RMS with the
+    Rebuild every frame at the corrected step ``delta_n + Delta_n`` and compare the residual RMS with the
     data RMS, over a border-cropped region where the fit is most reliable. A
     falling score round over round is what marks the fit as a real correction
     rather than fitted noise.
@@ -37,12 +36,11 @@ def step_field_quality(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.nd
     stack : np.ndarray, shape (N, P)
         Interferogram frames flattened to ``P = H*W`` pixels each.
     a, u, v : np.ndarray, shape (P,)
-        Background and quadrature components, as passed to
-        :func:`fit_step_field`.
+        Background and quadrature components of the corrected solve.
     delta : np.ndarray, shape (N,)
         Piston phase step of each frame, in radians.
     coeffs : np.ndarray, shape (J, N)
-        Per-frame coefficients, e.g. from :func:`fit_step_field`.
+        Per-frame step-field coefficients.
     basis : np.ndarray, shape (J, P)
         Step-field basis matching ``coeffs``.
     H, W : int
@@ -126,10 +124,10 @@ def step_field_quality(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.nd
 class StepFieldParam(MethodParam):
     """Diagnostics of a solve that recovered a spatially varying phase step.
 
-    Base for the methods of ``docs/sf_aia.md`` and ``docs/vp_aia.md``: both
-    expand ``Delta_n(x, y)`` on a spatial basis and report per-frame
-    coefficients. A subclass adds its own convergence fields, e.g.
-    :class:`phase_shift.methods.sf_aia.SFAIAParam`.
+    Base for a method that expands ``Delta_n(x, y)`` on a spatial basis and
+    reports per-frame coefficients, such as ``docs/vp_aia.md``. A subclass
+    adds its own convergence fields, e.g.
+    :class:`phase_shift.methods.vp_aia.VPAIAParam`.
 
     Attributes
     ----------
@@ -144,8 +142,7 @@ class StepFieldParam(MethodParam):
         Arguments the basis was built with, e.g. ``{"degree": 2}``.
     coeffs : np.ndarray, shape (J, N)
         Per-frame coefficients ``c_jn``, fit against the fields this result
-        reports. Not gauge-fixed (``docs/sf_aia.md`` Eq. T3b): subtract the
-        frame mean before reading a row as per-frame drift.
+        reports, ``docs/vp_aia.md`` Eq. (6).
     coeffs_rms : np.ndarray, shape (J,)
         RMS of each row of ``coeffs`` across frames.
     kappa_fit : float
@@ -178,7 +175,7 @@ class StepFieldParam(MethodParam):
 
         Overrides the piston-only broadcast of
         :meth:`phase_shift.methods.base.MethodParam.phase_step_field` with the
-        spatially varying step, ``docs/sf_aia.md`` Eq. (T1). Built in
+        spatially varying step, ``docs/vp_aia.md`` Eq. (6). Built in
         ``precision.accum``, as :func:`step_field_quality` does.
 
         Parameters

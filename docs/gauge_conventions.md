@@ -9,7 +9,7 @@ existing choices; it does not introduce new ones.
 
 | Freedom | Convention | Where |
 |---|---|---|
-| `(Φ, δ_n) → (Φ−c, δ_n+c)` for any constant `c` | `δ_n[0] = 0`, re-applied every iteration (`aia.md` §"Phase-origin convention"). `Φ` itself still carries an unresolved additive constant — harmless for relative phase maps. | `methods/gauge.py` (`pin_phase_origin`), applied by `methods/aia.py` (`aia`) and `methods/sf_aia.py` (`aia_step_field`) |
+| `(Φ, δ_n) → (Φ−c, δ_n+c)` for any constant `c` | `δ_n[0] = 0`, re-applied every iteration (`aia.md` §"Phase-origin convention"). `Φ` itself still carries an unresolved additive constant — harmless for relative phase maps. | `methods/gauge.py` (`pin_phase_origin`), applied by `methods/aia.py` (`aia`) |
 | `(Φ, δ) → (−Φ, −δ)` (cosine is even) | **Not** pinned by the solve — two independent solves may land on opposite branches (`aia.md` §"Identifiability and gauge", *Discrete*). Resolved downstream (see Reference/Combine below). | `reference.py` |
 | `α_n` (per-frame source-power scale): `α→λα`, `(a,b)→(a,b)/λ` | `median(alpha) = 1` | `solver.py` (`PhaseSolver._alpha_norm`) |
 | `g_n` (fringe-contrast scale): only enters as `g_n·b` | `median(g) = 1` (`aia.md` Eq. 16) | `methods/gauge.py` (`normalize_gain`); `frame_contrast.py` (`measure_frame_contrast`) |
@@ -23,23 +23,21 @@ existing choices; it does not introduce new ones.
 | With `g_n` free, `(u,v)` determined only up to any invertible `M` (`GL(2)`, `aia.md` Eq. 13), not just a rotation | Whiten `(u,v)` so `Σu² = Σv²`, `Σu·v = 0` — collapses `GL(2)` down to `O(2)`, the same residual ambiguity plain (`g≡1`) AIA already has | `methods/gauge.py` (`whiten_uv`); derivation in `aia.md` §"Identifiability and gauge", Eq. 15 |
 | `(g_n, δ_n) → (−g_n, δ_n+π)` | `g_n = hypot(P_n, Q_n) ≥ 0` always (`aia.md` Eq. 9) | `methods/steps.py` (`frame_step`) |
 
-## SF-AIA (method `"sf_aia"`)
+## Step field (method `"vp_aia"`)
 
-The step field `Δ_n(x,y) = Σ_j c_jn·p_j(x,y)` is expanded on a basis chosen by
-`basis`/`basis_kwargs` (`BASES` lists the families). Both conventions below
-hold for every family: `spatial_basis` applies the first to whatever functions
-a family supplies, and the second constrains the fitted coefficients.
+The step field `Δ_n(x,y) = Σ_j α_nj·H_j(x,y)` is expanded on a basis chosen by
+`basis`/`basis_kwargs` (`BASES` lists the families).
 
 | Freedom | Convention | Where |
 |---|---|---|
-| Spatial split of `δ_n(x,y)` into piston `δ_n` + field `Δ_n(x,y)` | Zero spatial mean per basis function, `⟨p_j⟩ = 0`, so `δ_n` is the field average of the step; the built-in `"poly"` family builds its monomials on coordinates centred at the field centroid and scaled to ≈`[-1,1]`, orthonormalized in ascending degree | `basis.py` (`spatial_basis`); `sf_aia.md` §"Conventions" Eq. T1/T3, §"Algorithm" step 2; `interference_model.md` Eq. 9a |
-| `c_jn ↔ Φ`: a per-frame-constant basis coefficient is indistinguishable from part of `Φ` | Frame-mean-zero: `c_jn ← c_jn − mean_n(c_jn)`, applied before correcting the data each refine round. **`StepFieldParam.coeffs` is reported un-gauge-fixed** — subtract the frame mean yourself before reading a row as physical per-frame drift. | `methods/gauge.py` (`center_coeffs`), applied by `methods/sf_aia.py` (`aia_step_field`); `sf_aia.md` §"Conventions" Eq. T3b, §"Gauge fixing" Eq. E4; `interference_model.md` Eq. 9b |
+| Spatial split of `δ_n(x,y)` into piston `δ_n` + field `Δ_n(x,y)` | Zero spatial mean per basis function, `⟨H_j⟩ = 0`, so `δ_n` is the field average of the step; the built-in `"poly"` family builds its monomials on coordinates centred at the field centroid and scaled to ≈`[-1,1]`, orthonormalized in ascending degree | `basis.py` (`spatial_basis`); `vp_aia.md` Eq. 6; `interference_model.md` Eq. 9a |
 
-## VP-AIA (`vp_aia.md`, not yet implemented)
+## VP-AIA (method `"vp_aia"`)
 
-Theory only: no method is registered for it, so the `Where` column cites
-`vp_aia.md` alone. VP-AIA fixes the same phase-step split as SF-AIA, and adds
-conventions for the four AIA parametrization freedoms; the normalization steps
+The `Where` column cites `vp_aia.md`; `methods/gauge.py`
+(`normalize_quadrature_frame`) applies the normalization. VP-AIA fixes the
+phase-step split above, and adds conventions for the four AIA parametrization
+freedoms; the normalization steps
 below are those of Appendix D §"Normalization", applied both to the
 zeroth-order solution and to the corrected fields.
 
@@ -61,7 +59,7 @@ the phase-step fit is built on.
 
 | Freedom | Convention | Where |
 |---|---|---|
-| Spatial origin for the tilt/curvature/piston split (origin-dependent — differs from SF-AIA's centroid convention above) | Pixel `(0,0)`, unnormalized `x,y` | `carrier.py` |
+| Spatial origin for the tilt/curvature/piston split (origin-dependent — differs from the centroid convention of the step field above) | Pixel `(0,0)`, unnormalized `x,y` | `carrier.py` |
 | Global piston of the output | Weighted circular mean set to zero: `arg(Σ w·e^{iφ}) = 0` | `carrier.py` |
 | Carrier frequency `(fx,fy)`, defined only modulo 1 cycle/pixel | FFT-bin peak picks the representative; the refine step tracks the nearest branch to the current estimate | `carrier.py`; `carrier_removal.md` §4 |
 

@@ -11,10 +11,9 @@ Public API, re-exported here regardless of which submodule a name lives in:
   fields.
 - :mod:`phase_shift.methods` -- ``METHODS``, ``MethodParam``, and the building
   blocks the methods share: the least-squares steps, the gauge conventions,
-  the accuracy diagnostics, and the spatially varying phase step. Three
-  methods are registered: ``"aia"``, and ``"sf_aia"``/``"vp_aia"``, which
-  recover a spatially varying phase-step error by a refinement loop and by a
-  one-pass first-order fit respectively.
+  the accuracy diagnostics, and the spatially varying phase step. Two
+  methods are registered: ``"aia"``, and ``"vp_aia"``, which recovers a
+  spatially varying phase-step error as a first-order correction to AIA.
 - :mod:`phase_shift.basis` -- ``spatial_basis``, ``BASES``: the basis families
   a phase-step error field is expanded on.
 - :mod:`phase_shift.interference_model` -- ``model_stack``

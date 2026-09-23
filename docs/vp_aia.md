@@ -168,9 +168,7 @@ $$\frac{\sigma_\Phi^2}{\sigma_0^2\sum_ns_n^2}\approx1+\frac{\sum_jH_j(x,y)^2}{K}
 
 The correction raises the phase noise by a relative amount of order $J/K$, largest where $\sum_jH_j^2$ is large. Eq. (20) reads Eq. (19) under the four conditions above; for irregular steps, per-frame gains, varying contrast, or unevenly resolved modes, use Eq. (19).
 
-**Noise of the baseline steps.** The first term of Eq. (19) is `aia_noise.md` Eq. (10), the phase variance at known $\delta_n$ and $g_n$. Estimating both from the same frames adds the $O(1/K)$ term of `aia_noise.md` Eqs. (24) and (29); the zeros of $\gamma$ say only that the first-order frame corrections leave $\Phi$ unchanged to first order. The two terms add, as in `sf_aia.md` Eq. (E9); their cross-correlation is not derived here.
-
-**Comparison with SF-AIA.** For the same $J$-mode field, `sf_aia.md` Eq. (E8) gives $1+J/(4N_p)$ where Eq. (20) gives $1+J/K$, with $K=N_p$. Both reduce to a quadratic form in the matrix with entries $\Pi_{nm}\cos(\delta_n-\delta_m)$, whose eigenvalue on the second temporal harmonic is $\tfrac12$. SF-AIA's per-frame fit multiplies that harmonic by the eigenvalue; VP-AIA's joint fit inverts it, so the variances differ by $2/\tfrac12=4$. It is the same factor as in `sf_aia.md` §"Bias of a single pass": one SF-AIA pass recovers the first and second harmonics of $c_{jn}$ at half their size and attenuates their noise by the same half. The smaller SF-AIA variance is bought with the attenuation that is its bias; its refinement loop gives that attenuation back round by round, and its noise passes Eq. (20) rather than settling at it. VP-AIA reaches the unbiased field and Eq. (20) in one pass.
+**Noise of the baseline steps.** The first term of Eq. (19) is `aia_noise.md` Eq. (10), the phase variance at known $\delta_n$ and $g_n$. Estimating both from the same frames adds the $O(1/K)$ term of `aia_noise.md` Eqs. (24) and (29); the zeros of $\gamma$ say only that the first-order frame corrections leave $\Phi$ unchanged to first order. The two terms add; their cross-correlation is not derived here.
 
 ## Appendix A. Unknowns and identifiability
 

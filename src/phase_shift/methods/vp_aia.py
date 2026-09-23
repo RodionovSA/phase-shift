@@ -6,9 +6,8 @@ step as a first-order correction to the AIA solution, in one pass: the pixel
 fields are eliminated by projection (§"Removing the pixel corrections"), the
 frame corrections and mode coefficients are fitted jointly
 (:func:`phase_shift.methods.vp_system.fit_frame_and_coeffs`), and the pixel
-corrections follow in closed form from Eq. (16). Unlike SF-AIA's alternation
-it reaches the joint least-squares solution without a refinement loop, and so
-without that loop's attenuation bias; see §"Comparison with SF-AIA".
+corrections follow in closed form from Eq. (16). Being a joint fit, it
+reaches the joint least-squares solution without a refinement loop.
 """
 
 from dataclasses import dataclass

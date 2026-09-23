@@ -61,7 +61,7 @@ Rules for the `phase_shift` package. The root `AGENTS.md` still applies.
 - Presets: `"single"` (work float32, accum float64, the default), `"double"`,
   `"fast"` (both float32). A `(N, P)` array must never come out wider than
   `p.work` by accident: cast the `(N,)` and `(J, P)` operands feeding it
-  first, as `sf_aia.aia_step_field` does with `basis_work`.
+  first, as `vp_system` does with `P_a`, `Q_a`.
 - Avoid extra full-size temporaries: prefer scalar sums or chunked reductions.
 - Minimize host syncs (`float(...)`, `asnumpy`): at most a few per iteration,
   never per pixel or per frame inside a loop.

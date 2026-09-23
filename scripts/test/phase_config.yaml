@@ -12,5 +12,5 @@ gain_mode: joint   # fit g_n jointly inside the method's own iteration ("none" f
 g: null            # precomputed gain array; overrides gain_mode when set
 
 # Method
-method: sf_aia
-method_kwargs: {"iters": 30, "tol": 1.0e-4, "basis_kwargs": {"degree": 2}, "refine_iters": 10, "refine_tol": 1.0e-4}
+method: vp_aia
+method_kwargs: {"iters": 30, "tol": 1.0e-4, "basis_kwargs": {"degree": 2}, "rounds": 1}

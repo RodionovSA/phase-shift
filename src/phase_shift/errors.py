@@ -3,8 +3,8 @@
 
 Computed from a method's output (``b, phi, delta, g``) rather than inside the
 solve: ``docs/aia_noise.md`` for the Eq. (10) baseline and
-the exact Stage-2/3 corrections, Eqs. (24) and (29); ``docs/sf_aia.md``
-§"Noise of the corrected solve" for the step-field term. Each method exposes
+the exact Stage-2/3 corrections, Eqs. (24) and (29); ``docs/vp_aia.md``
+§"Noise of the corrected estimates" for the step-field term. Each method exposes
 its own map through :meth:`phase_shift.methods.base.MethodParam.phi_error`;
 the functions here are the pieces those share.
 """
@@ -174,9 +174,8 @@ def _mode_quadratic_form(t: np.ndarray, basis_block: np.ndarray, weight: np.ndar
                          xp: ModuleType) -> np.ndarray:
     """Per-pixel ``z' W z`` with ``z_(n,j) = t_n H_j``, on one pixel block.
 
-    The quadratic form both step-field error models reduce to: ``docs/sf_aia.md``
-    Eq. (E7) and ``docs/vp_aia.md`` Eq. (19) differ in what ``t_n`` and ``W``
-    are, not in this contraction.
+    The quadratic form of ``docs/vp_aia.md`` Eq. (19) in the coefficient block,
+    with ``t_n = s_n w_n``.
 
     Parameters
     ----------
@@ -196,140 +195,6 @@ def _mode_quadratic_form(t: np.ndarray, basis_block: np.ndarray, weight: np.ndar
     J = basis_block.shape[0]
     z = (t[:, None, :] * basis_block[None, :, :]).reshape(N * J, C)
     return xp.sum(z * (weight @ z), axis=0)
-
-
-def _step_field_sensitivity(u: np.ndarray, v: np.ndarray, P_n: np.ndarray,
-                            Q_n: np.ndarray, sl: slice) -> np.ndarray:
-    """``docs/sf_aia.md`` Eq. (T7)'s ``w_n = u Q_n - v P_n`` on one pixel block.
-
-    Parameters
-    ----------
-    u, v : np.ndarray, shape (P,)
-        Quadrature fields, flattened, ``docs/aia.md`` Eq. (2).
-    P_n, Q_n : np.ndarray, shape (N,)
-        Per-frame quadrature coefficients, ``docs/aia.md`` Eq. (3), in ``u``'s
-        dtype so the returned block is not widened.
-    sl : slice
-        Pixels of this block.
-
-    Returns
-    -------
-    np.ndarray, shape (N, C)
-    """
-    return Q_n[:, None] * u[None, sl] - P_n[:, None] * v[None, sl]
-
-
-def step_field_phi_error(b: np.ndarray, phi: np.ndarray, delta: np.ndarray,
-                         g: np.ndarray, fit_gain: bool, sigma0: np.ndarray,
-                         simplified: bool, basis: np.ndarray, xp: ModuleType,
-                         chunk: int = 65_536,
-                         precision: str | Precision | None = None) -> np.ndarray:
-    """``docs/sf_aia.md``'s step-field phase-error map, Eq. (E7).
-
-    The AIA map of :func:`aia_phi_error_parts` plus the variance the fitted
-    step field adds, §"Noise of the corrected solve". Both terms are exact to
-    first order in the noise; §"Validity" states what their sum leaves out.
-
-    Parameters
-    ----------
-    b, phi : np.ndarray, shape (H, W)
-        Fitted fringe amplitude and phase in radians.
-    delta, g : np.ndarray, shape (N,)
-        Fitted per-frame phase step and gain.
-    fit_gain : bool
-        Whether ``g`` was fitted jointly with the steps.
-    sigma0 : np.ndarray, shape (H, W), or float
-        Per-pixel noise standard deviation, ``docs/aia_noise.md`` Eq. (16).
-    simplified : bool
-        Return the ``docs/aia_noise.md`` Eq. (10) baseline alone, dropping
-        both the fitted-step correction and the step-field term; both are
-        ``O(1/N_p)``.
-    basis : np.ndarray, shape (J, P)
-        The step field's basis, from :func:`phase_shift.basis.spatial_basis`.
-        An empty basis reduces this to the plain-``aia`` result.
-    xp : module
-    chunk : int, default 65536
-        Pixels reduced per block; bounds memory, not the result.
-    precision : str or Precision, optional
-        Dtypes to run in; see :class:`phase_shift.backend.Precision`. The term
-        is a difference of larger quantities, so ``precision.accum`` carries
-        every pixel-sized block; the ``(N*J, N*J)`` matrices stay float64.
-
-    Notes
-    -----
-    Two passes over the pixels: one for Eq. (E7)'s matrices ``E_nm`` and
-    ``G^(n)``, one for its quadratic form. No ``(N, P)`` array is held.
-
-    Returns
-    -------
-    np.ndarray, shape (H, W)
-        ``sigma_Phi(x, y)``, in radians.
-    """
-    acc = Precision.of(precision).accum
-    phi_var, k = aia_phi_error_parts(b, phi, delta, g, fit_gain, sigma0, simplified, xp,
-                                     precision=precision)
-    if simplified:
-        return xp.sqrt(phi_var)
-
-    H, W = phi.shape
-    basis = xp.asarray(basis, dtype=acc)                                  # (J, P)
-    J = basis.shape[0]
-    if J == 0:
-        return xp.sqrt(phi_var)
-
-    N = delta.shape[0]
-    delta64 = xp.asarray(delta, dtype=xp.float64)
-    g64 = xp.asarray(g, dtype=xp.float64)
-    P_n = g64 * xp.cos(delta64)                                           # (N,), Eq. (3)
-    Q_n = g64 * xp.sin(delta64)
-    phi_a = xp.asarray(phi, dtype=acc).reshape(-1)                        # (P,)
-    b_a = xp.asarray(b, dtype=acc).reshape(-1)
-    u = b_a * xp.cos(phi_a)                                               # (P,), Eq. (2)
-    v = -b_a * xp.sin(phi_a)
-    del phi_a, b_a
-    P_tot = u.shape[0]
-    sigma0_sq = xp.asarray(sigma0, dtype=acc) ** 2
-    sigma0_sq = (sigma0_sq.reshape(-1) if sigma0_sq.ndim else sigma0_sq) \
-        * xp.ones(P_tot, dtype=acc)                                       # (P,)
-    # The (N,) coefficients stay float64, but the blocks below are pixel-sized:
-    # they take accum copies so a float64 (N,) operand cannot widen them.
-    P_a, Q_a = P_n.astype(acc), Q_n.astype(acc)
-    blocks = [slice(s, min(s + chunk, P_tot)) for s in range(0, P_tot, chunk)]
-
-    # First pass: Eq. (E7)'s noise-weighted cross-frame matrices D_n^T L D_m,
-    # and the unweighted blocks that are Eq. (E1)'s own normal matrices G^(n).
-    DLD = xp.zeros((N * J, N * J), dtype=xp.float64)
-    G = xp.zeros((N, J, J), dtype=xp.float64)
-    for sl in blocks:
-        w_field = _step_field_sensitivity(u, v, P_a, Q_a, sl)             # (N, C)
-        rows = (w_field[:, None, :] * basis[None, :, sl]).reshape(N * J, -1)
-        DLD += ((rows * sigma0_sq[None, sl]) @ rows.T).astype(xp.float64)
-        for n in range(N):
-            block = rows[n * J:(n + 1) * J]
-            G[n] += (block @ block.T).astype(xp.float64)
-    G_inv = xp.linalg.pinv(G)                                             # (N, J, J)
-    K = xp.einsum('nja,namb,mbk->njmk', G_inv, DLD.reshape(N, J, N, J), G_inv)
-
-    # Pi removes from a column over frames its pixel-step fit, docs/vp_aia.md Eq. (10).
-    A = xp.stack([xp.ones(N, dtype=xp.float64), P_n, Q_n], axis=1)        # (N, 3)
-    Pi = xp.eye(N, dtype=xp.float64) - A @ xp.linalg.pinv(A.T @ A) @ A.T  # (N, N)
-    weight = (Pi[:, None, :, None] * K).reshape(N * J, N * J).astype(acc)  # (N*J, N*J)
-
-    # Second pass: t_n = s_n w_n, frame-centered by Eq. (E4), then Eq. (E7)'s
-    # quadratic form. With w = (sin Phi, cos Phi) = (-v, u)/b, Eq. (E7)'s
-    # s_n = -(w . k_n)/b is (k_n0 v - k_n1 u)/b^2.
-    k_a = xp.asarray(k, dtype=acc)
-    floor = xp.asarray(xp.finfo(xp.float64).eps, dtype=acc)
-    extra = xp.empty(P_tot, dtype=acc)
-    for sl in blocks:
-        w_field = _step_field_sensitivity(u, v, P_a, Q_a, sl)             # (N, C)
-        b2 = xp.maximum(u[sl] ** 2 + v[sl] ** 2, floor)                   # (C,)
-        s_n = (k_a[0][:, None] * v[None, sl] - k_a[1][:, None] * u[None, sl]) / b2[None, :]
-        t = s_n * w_field                                                 # (N, C)
-        t = t - xp.mean(t, axis=0, keepdims=True)
-        extra[sl] = _mode_quadratic_form(t, basis[:, sl], weight, xp)
-
-    return xp.sqrt(xp.maximum(phi_var + extra.reshape(H, W).astype(b.dtype), 0))
 
 
 def vp_phi_error(b: np.ndarray, phi: np.ndarray, P_n: np.ndarray, Q_n: np.ndarray,
@@ -372,7 +237,7 @@ def vp_phi_error(b: np.ndarray, phi: np.ndarray, P_n: np.ndarray, Q_n: np.ndarra
     so a spatially varying ``sigma0`` scales the second term pixel by pixel
     rather than re-weighting the fit. §"Noise of the baseline steps"
     leaves the cross-correlation with the zeroth-order step noise underived;
-    the two terms are added, as in ``docs/sf_aia.md`` Eq. (E9).
+    the two terms are added.
 
     Returns
     -------

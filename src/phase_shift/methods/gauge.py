@@ -136,25 +136,6 @@ def center_offsets(c: np.ndarray, xp: ModuleType) -> np.ndarray:
     return c - xp.mean(c)
 
 
-def center_coeffs(coeffs: np.ndarray) -> np.ndarray:
-    """Center each basis term's coefficients to zero frame mean.
-
-    ``docs/sf_aia.md`` Eq. (T3b)/(E4) and ``docs/interference_model.md``
-    Eq. (9b): a coefficient with a nonzero frame mean adds the same static
-    pattern to every frame and belongs to the phase, not to the step field.
-
-    Parameters
-    ----------
-    coeffs : np.ndarray, shape (J, N)
-        Per-frame step-field coefficients.
-
-    Returns
-    -------
-    np.ndarray, shape (J, N)
-    """
-    return coeffs - coeffs.mean(axis=1, keepdims=True)
-
-
 def normalize_quadrature_frame(a: np.ndarray, u: np.ndarray, v: np.ndarray,
                                P_n: np.ndarray, Q_n: np.ndarray, xp: ModuleType,
                                precision: str | Precision | None = None

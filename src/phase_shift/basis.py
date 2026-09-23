@@ -2,10 +2,10 @@
 """Spatial basis families for the phase-step error field.
 
 The field is expanded as ``Delta_n = sum_j c_jn * p_j``,
-``docs/interference_model.md`` Eq. (9b) and ``docs/sf_aia.md`` Eq. (T1). Every
-family is centered and orthonormalized here, so each basis function has zero
-spatial mean (Eq. 9a, Eq. T3) whatever the family. ``docs/vp_aia.md`` Eq. (6)
-uses the same functions as its modes ``H_j``.
+``docs/interference_model.md`` Eq. (9b) and ``docs/vp_aia.md`` Eq. (6), whose
+modes ``H_j`` these functions are. Every family is centered and orthonormalized
+here, so each basis function has zero spatial mean (Eq. 9a) whatever the
+family.
 
 Add a family by registering one builder of its raw functions in
 :data:`BASIS_REGISTRY`; the conventions are applied by :func:`spatial_basis`.
@@ -22,8 +22,6 @@ from .backend import Precision
 
 def _coords(H: int, W: int, xp: ModuleType) -> tuple[np.ndarray, np.ndarray]:
     """Pixel coordinates centered on the field and scaled to about ``[-1, 1]``.
-
-    The convention of ``docs/sf_aia.md`` §"Algorithm" step 2.
 
     Parameters
     ----------
@@ -47,8 +45,7 @@ def _coords(H: int, W: int, xp: ModuleType) -> tuple[np.ndarray, np.ndarray]:
 def _poly_terms(H: int, W: int, xp: ModuleType, degree: int = 1) -> np.ndarray:
     """Monomials of total degree 1 through ``degree``, before centering.
 
-    ``docs/sf_aia.md`` Eq. (T1): ``x, y, x^2, xy, y^2, ...`` in ascending
-    degree, so lower orders are fixed before higher ones build on them.
+    ``x, y, x^2, xy, y^2, ...`` in ascending degree, so lower orders are fixed before higher ones build on them.
     Degree 0 is excluded, being the piston.
 
     Parameters
@@ -91,8 +88,8 @@ BASES = list(BASIS_REGISTRY)
 def _centered_orthonormal(rows: np.ndarray, xp: ModuleType, context: str) -> np.ndarray:
     """Center and orthonormalize ``rows`` in place, in order.
 
-    Subtracts each row's spatial mean (``docs/interference_model.md`` Eq. 9a,
-    ``docs/sf_aia.md`` Eq. T3), then applies modified Gram-Schmidt against the
+    Subtracts each row's spatial mean (``docs/interference_model.md`` Eq. 9a),
+    then applies modified Gram-Schmidt against the
     rows already fixed, so a truncation of the basis is itself a basis.
 
     Parameters

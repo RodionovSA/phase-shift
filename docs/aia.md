@@ -8,7 +8,7 @@ This document derives the advanced iterative algorithm (AIA) for phase-shifting 
 
 $$I_n(x,y)=\alpha_n\Big[a(x,y)+g_n\,b(x,y)\cos\big(\Phi(x,y)+\delta_n+\Delta_n(x,y)\big)\Big],\qquad n=1\dots N.$$
 
-AIA solves the uniform-piston limit $\Delta_n\equiv0$ (`interference_model.md`, Eq. 20), in which each frame's phase step is a scalar $\delta_n$. When $\Delta_n\not\equiv0$, the recovered $\Phi$ and $b$ carry a low-order bias that does not shrink with more frames; `sf_aia.md` and `vp_aia.md` correct it.
+AIA solves the uniform-piston limit $\Delta_n\equiv0$ (`interference_model.md`, Eq. 20), in which each frame's phase step is a scalar $\delta_n$. When $\Delta_n\not\equiv0$, the recovered $\Phi$ and $b$ carry a low-order bias that does not shrink with more frames; `vp_aia.md` corrects it.
 
 The source-power factor $\alpha_n$ is not fitted. With many fringes, $\langle a\rangle\gg\langle b\rangle$, so $\langle I_n\rangle\approx\alpha_n\langle a\rangle$; $\alpha_n$ is estimated from the frame mean and divided out, with $\operatorname{median}(\alpha_n)=1$. The per-frame offset $c_n$ below absorbs what remains. AIA then solves
 
