@@ -49,15 +49,14 @@ Eq. (3) is fully general and, as it stands, cannot be solved from measured inten
    $$\phi_{\text{inst}}(x, y, t) = \phi_{\text{inst}}(x, y) + \phi_{\text{carrier}}(x, y) + \delta(x, y, t) \tag{9}$$
    Split the step into its spatial average over the field and the remainder,
    $$\delta(x, y, t) = \delta(t) + \Delta(x, y, t), \qquad \big\langle\Delta(x, y, t)\big\rangle_{x, y} = 0 \tag{9a}$$
-   so $\delta(t)$ is the piston — the uniform part of the step — and $\Delta(x, y, t)$ is its zero-mean spatial residual. The residual is smooth and low-order in $(x, y)$; expand it on a complete polynomial basis $p_j(x, y)$ of total degree 1 through $M$ — $J = \tfrac{(M+1)(M+2)}{2} - 1$ modes in all, e.g. $J = 2$ (just $x, y$) for tilt alone, $J = 5$ once curvature is included — each with zero average over the field:
-   $$\Delta(x, y, t) = \sum_{j=1}^{J} c_j(t)\,p_j(x, y), \qquad \big\langle c_j(t)\big\rangle_t = 0 \tag{9b}$$
-   Degree 1 ($x$, $y$) is a tilt of the step, degree 2 ($x^2$, $xy$, $y^2$) a curvature change; degree 0 is excluded from the basis, since that is exactly the piston. The two zero-mean conditions make the decomposition unambiguous: the spatial one (Eq. 9a) defines $\delta(t)$ as the field average of the true step, and the temporal one (Eq. 9b) separates the step residual from the carrier — a mode coefficient with a nonzero frame mean adds the same static pattern to every frame, indistinguishable from a static addition to the phase, and belongs in $\phi_{\text{carrier}}$ rather than in $\Delta$; only the part of the step that varies from frame to frame is $\Delta$.
+   so $\delta(t)$ is the piston — the uniform part of the step — and $\Delta(x, y, t)$ is its zero-mean spatial residual. The residual is smooth and low-order in $(x, y)$; expand it on $J$ linearly independent spatial modes $H_j(x, y)$ with time-dependent coefficients $c_j(t)$, each mode with zero average over the field, $\langle H_j\rangle_{x, y} = 0$:
+   $$\Delta(x, y, t) = \sum_{j=1}^{J} c_j(t)\,H_j(x, y), \qquad \big\langle c_j(t)\big\rangle_t = 0 \tag{9b}$$
+   The choice of modes is left to the extraction method. The two zero-mean conditions make the decomposition unambiguous. The spatial one, $\langle H_j\rangle_{x, y} = 0$, gives Eq. (9a) for any coefficients, so $\delta(t)$ is the field average of the step. The temporal one separates the step residual from the carrier: a coefficient with a nonzero frame mean adds the same static pattern to every frame, indistinguishable from a static addition to the phase, and belongs in $\phi_{\text{carrier}}$ rather than in $\Delta$.
 
    Substituting into Eq. (5) gives the total phase
    $$\begin{aligned} \phi(x, y, \Delta z, t) = {}&\phi(x, y) + \phi_{\text{inst}}(x, y) + \phi_{\text{carrier}}(x, y) \\ &+ \delta(t) + \Delta(x, y, t) \end{aligned}\tag{10}$$
    and Eq. (8) becomes
    $$\begin{aligned} I(x, y, t) = \alpha(t)\Big[&a(x, y) \\ &+ \gamma(x, y, \Delta z, t)\,b(x, y)\,\cos\big(\phi(x, y) + \phi_{\text{inst}}(x, y) \\ &\qquad\qquad + \phi_{\text{carrier}}(x, y) + \delta(t) + \Delta(x, y, t)\big)\Big] \end{aligned}\tag{11}$$
-   Measured frame to frame on this setup, $\Delta$ is not negligible: the step carries a tilt that changes from frame to frame and, more weakly, a curvature change, at a level comparable to the low-order phase structure the model is otherwise meant to resolve, not a small correction to it. Whether this comes from the stepping actuator's own motion or from vibration of the interferometer arms during the sweep is not established; both produce the same functional form in Eq. (9a)–(9b).
 
 4. **Random per-frame contrast factor.** Within an acquisition the coherence envelope $\gamma$ is effectively static — its variation over the sweep is negligible — so its static spatial structure absorbs into $b(x, y)$. Separately, mechanical vibration and index fluctuations during each frame's exposure reduce the fringe contrast by a spatially-uniform, temporally-random factor $g(t)$, with $\langle g \rangle$ set by the typical disturbance and frame-to-frame fluctuations that are non-periodic and vary between sessions. This factor multiplies only the modulation term:
    $$\gamma(x, y, \Delta z, t) = \gamma(x, y)\,g(t) \tag{12}$$
@@ -77,7 +76,7 @@ Substituting into Eq. (14) gives the full model
 
 $$I(x, y, t) = \alpha(t)\Big[a(x, y) + g(t)\,b(x, y)\,\cos\big(\Phi(x, y) + \delta(t) + \Delta(x, y, t)\big)\Big] \tag{16}$$
 
-In practice this model is applied to a sequence of $N$ acquired frames. Writing $\alpha_n = \alpha(t_n)$, $g_n = g(t_n)$, $\delta_n = \delta(t_n)$, $\Delta_n(x, y) = \Delta(x, y, t_n) = \sum_j c_{jn}\,p_j(x, y)$ for frame $n$, Eq. (16) becomes the per-frame form
+In practice this model is applied to a sequence of $N$ acquired frames. Writing $\alpha_n = \alpha(t_n)$, $g_n = g(t_n)$, $\delta_n = \delta(t_n)$, $\Delta_n(x, y) = \Delta(x, y, t_n) = \sum_j c_{jn}\,H_j(x, y)$ for frame $n$, Eq. (16) becomes the per-frame form
 
 $$\begin{aligned} I_n(x, y) = \alpha_n\Big[&a(x, y) \\ &+ g_n\,b(x, y)\,\cos\big(\Phi(x, y) + \delta_n + \Delta_n(x, y)\big)\Big], \qquad n = 1 \dots N \end{aligned}\tag{17}$$
 
@@ -106,7 +105,7 @@ Eq. (19) is linear in $(a, u, v)$ for a known phase step, which is why extractio
 
 ## Uniform-piston limit
 
-Setting $\Delta_n \equiv 0$ — equivalently $M = 0$, so $J = 0$ and Eq. (9b) has no modes — reduces Eq. (17) to
+Setting $\Delta_n \equiv 0$ — equivalently $J = 0$, so Eq. (9b) has no modes — reduces Eq. (17) to
 
 $$I_n(x, y) = \alpha_n\Big[a(x, y) + g_n\,b(x, y)\,\cos\big(\Phi(x, y) + \delta_n\big)\Big] \tag{20}$$
 
