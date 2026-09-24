@@ -53,8 +53,9 @@ known.
     shared by the methods' `phi_error` maps.
   - `frame_contrast.py` — `measure_frame_contrast`/`measure_frame_visibility`,
     per-frame fringe gain and visibility estimated from the spatial carrier.
-  - `carrier.py` — `remove_carrier`, estimating/removing a spatial
-    carrier and (optionally) defocus from a wrapped phase map.
+  - `carrier.py` — `remove_carrier`, fitting and removing a low-order
+    polynomial carrier (tilt, defocus, ...) from a wrapped phase map
+    (`docs/carrier_removal.md`).
   - `reference.py` — `subtract_reference`, resolving the phase sign-branch
     ambiguity between a sample and reference phase map.
   - `combine.py` — `combine_acquisitions`, averaging repeated independent

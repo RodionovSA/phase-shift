@@ -1,301 +1,118 @@
 # Carrier removal
 
-This document derives carrier removal — subtracting a smooth, low-order phase field from a
-recovered wrapped phase map — as a single optimization problem, posed on the complex exponential
-of the phase rather than on the phase itself. Doing so is what makes the problem well posed at
-all: the measurement in [`interference_model.md`](interference_model.md) constrains $e^{i\Phi}$,
-never $\Phi$, so any estimator built from $\Phi$ or a difference of $\Phi$'s carries a spurious
-$2\pi$-wrap ambiguity that one built from $e^{i\Phi}$ does not. It backs `phase.carrier`, and its
-basis is the same degree-$M$ polynomial family
-[`sf_aia.md`](sf_aia.md) already built for the spatially-varying
-phase-step error field — the carrier is that family's static member (§6 makes this precise).
+Carrier removal fits a smooth, low-order phase field to a recovered phase map and subtracts it. The fit is posed on $e^{i\Phi}$ rather than on $\Phi$, which makes it exact under $2\pi$ wraps and needs no unwrapping.
 
-Unlike `interference_model.md`'s and `sf_aia.md`'s derivations, the $(x,y)$
-dependence is not suppressed here: the whole subject is the spatial shape of $\Phi$, so pixel
-coordinates stay explicit throughout.
+## Model
 
-## 1. Setup
+A solve of `interference_model.md` Eq. (17), by AIA (`aia.md`) or VP-AIA (`vp_aia.md`), returns the total static phase of `interference_model.md` Eq. (15),
 
-### 1.1 What the carrier is
+$$\Phi(x,y)=\phi(x,y)+\phi_{\text{inst}}(x,y)+\phi_{\text{carrier}}(x,y).$$
 
-`interference_model.md` Eq. (15) defines the total static phase a solve returns as
+The data cannot separate the three terms. $\phi_{\text{carrier}}$ is low-order by construction and $\phi_{\text{inst}}$ usually is too, so carrier removal fits a low-order model of $\Phi$ itself and treats everything it captures as instrumental.
 
-$$\Phi(x,y) = \phi(x,y) + \phi_{\text{inst}}(x,y) + \phi_{\text{carrier}}(x,y) \tag{C0}$$
+The intensities depend on $\Phi$ only through a cosine, so at each pixel $\Phi$ is known only up to an integer multiple of $2\pi$: the data determine $e^{i\Phi}$, not $\Phi$. A carrier estimate must be invariant under $\Phi\to\Phi+2\pi m(x,y)$ for any integer field $m$, and a criterion built from $e^{i\Phi}$ is invariant without unwrapping.
 
-and Eq. (17) is fit for $\Phi$ directly — never for $\phi$ alone, since a single acquisition
-cannot separate $\phi$ from $\phi_{\text{inst}}$ or $\phi_{\text{carrier}}$ by their functional
-form. $\phi_{\text{carrier}}$ is smooth and low-order by construction (the tilt/defocus set by
-the reference-arm angle and curvature mismatch); $\phi_{\text{inst}}$ is typically low-order too,
-from fixed path/aberration mismatch. Carrier removal does not distinguish the two — it fits and
-subtracts a low-order model of $\Phi$ itself, on the working assumption that whatever of $\Phi$
-is captured by that model is instrumental rather than sample structure. §4.5 returns to what this
-assumption costs.
+## Basis
 
-### 1.2 Why exponentials
+Let $p_1,\dots,p_L$ be the monomials in $x,y$ of total degree $1$ to $M$, on coordinates centred at the field centroid and scaled to about $[-1,1]$, each made zero-mean over the field and orthonormalized in ascending degree, so $L=\tfrac{(M+1)(M+2)}{2}-1$. Add the constant $p_0=1$, which is orthogonal to the others since they have zero mean. The carrier field is
 
-Eq. (17) depends on $\Phi(x,y)$ only through $\cos(\Phi + \delta_n + \Delta_n)$. At a single
-pixel, two candidate phases that differ by any integer multiple of $2\pi$ produce identical data
-for every frame $n$ — the model, and therefore any solve of it, cannot tell them apart. So the
-solved $\Phi(x,y)$ that carrier removal receives is only ever known up to an independent integer
-multiple of $2\pi$ at each pixel: what the data actually determines is the field
-$e^{i\Phi(x,y)}$, not $\Phi(x,y)$ itself. An estimator is only correctly posed against this model
-if it is exactly invariant under $\Phi(x,y) \to \Phi(x,y) + 2\pi m(x,y)$ for arbitrary integer
-$m(x,y)$ — and that invariance is available for free, without unwrapping, only to a criterion
-built from $e^{i\Phi}$. §2.4 shows concretely what breaks in a criterion built from $\Phi$ (or a
-wrap-safe difference of it) instead.
+$$\Psi(x,y)=\sum_{l=0}^{L}\eta_l\,p_l(x,y),\tag{1}$$
 
-### 1.3 Basis and its gauge
+with piston $\eta_0$ and low-order shape $\eta_1,\dots,\eta_L$.
 
-Reuse `sf_aia.md` Eq. (T1)/(T3) directly: on coordinates centred at the field
-centroid and scaled to $\approx[-1,1]$, $p_1,\dots,p_J$ are the monomials of total degree $1$
-through $M$, each made zero-mean over the field and Gram–Schmidt-orthonormalized in ascending
-degree ($J = \tfrac{(M+1)(M+2)}{2}-1$) — exactly what `phase.methods.sf_aia._poly_basis`
-already builds; this document does not redefine it.
+## Objective
 
-Carrier removal additionally needs the constant term that basis deliberately excludes (it is
-exactly the SF-AIA model's piston $\delta_n$ there, Eq. T1). Add it back as $p_0(x,y) \equiv
-1/\sqrt{N_p}$ ($N_p = H\times W$, so $p_0$ has unit norm over the field). Because every $p_j$,
-$j\ge1$, is field-mean-zero (Eq. T3), $p_0$ is automatically orthogonal to all of them — no
-re-orthonormalization needed — so $\{p_0, p_1, \dots, p_J\}$ is an orthonormal basis of
-$J+1$ functions. Define the fitted carrier field
+With a reliability weight $\omega(x,y)\ge0$, define the weighted complex field and the residual phase
 
-$$P(x,y;\mathbf a) = \sum_{j=0}^{J} a_j\,p_j(x,y) \tag{C1}$$
+$$\zeta=\omega\,e^{i\Phi},\qquad\chi=\Phi-\Psi.\tag{2}$$
 
-$a_0$ carries the constant (piston) part of $\Phi$; $a_1,\dots,a_J$ the low-order spatial shape.
+The natural weight is the fringe amplitude, $\omega=b$. With the quadrature fields of `aia.md` Eq. (2), $u-iv=b\,e^{i\Phi}$, so then $\zeta=u-iv$: no division by $b$ is needed, and pixels without fringe contrast drop out.
 
-## 2. The estimation problem
+Carrier removal maximizes
 
-Index the field's $N_p$ pixels by $k$, so $\Phi_k \equiv \Phi(x_k,y_k)$, $P_k(\mathbf a) \equiv
-P(x_k,y_k;\mathbf a)$, and similarly for any other per-pixel quantity below.
+$$F(\boldsymbol\eta)=\sum_{x,y}\omega\cos\chi=\operatorname{Re}\sum_{x,y}\zeta\,e^{-i\Psi}.\tag{3}$$
 
-### 2.1 The weighted complex field
+Since $\sum_{x,y}\omega(1-\cos\chi)=\tfrac12\sum_{x,y}\omega\,|e^{i\Phi}-e^{i\Psi}|^2$, this is weighted least squares between points on the unit circle; for small $\chi$ it reduces to weighted least squares on $\chi$ (Appendix A).
 
-Define the weighted complex field $z_k = w_k\,e^{i\Phi_k}$, with $w_k \ge 0$ a per-pixel
-reliability weight. Two instances of this are used in practice, and they coincide:
+The piston can be profiled out. With $\Psi'=\sum_{l\ge1}\eta_lp_l$,
 
-- **From a wrapped map.** $\Phi_k$ is the solved `phi`; take $w_k = b_k$ (the modulation map,
-  `PhaseResult.b`) or a supplied `weight`/`mask`, mirroring `remove_carrier`'s existing arguments.
-- **From quadrature.** `interference_model.md` Eq. (18) gives $u = b\cos\Phi$, $v = -b\sin\Phi$,
-  so $e^{i\Phi} = \cos\Phi + i\sin\Phi = (u - iv)/b$. Taking $w_k = b_k$ exactly cancels the
-  division: $z_k = b_k\cdot(u_k-iv_k)/b_k = u_k - iv_k$ (Eq. C2). The modulation weight is then
-  free — no separate array, no division by a $b$ that may be near zero — and a pixel with little
-  or no fringe contrast self-down-weights to $z_k \approx 0$ rather than contributing an unstable
-  phase.
+$$\max_{\eta_0}F=\Big|\sum_{x,y}\omega\,e^{i(\Phi-\Psi')}\Big|,\qquad\eta_0=\arg\sum_{x,y}\omega\,e^{i(\Phi-\Psi')}.\tag{4}$$
 
-$$z_k = w_k\,e^{i\Phi_k} = u_k - i v_k \quad\text{(with } w_k = b_k\text{)} \tag{C2}$$
+## Newton iteration
 
-### 2.2 The objective
+Setting the gradient of Eq. (3) to zero gives
 
-With the demodulated field $d_k(\mathbf a) = z_k\,e^{-iP_k(\mathbf a)}$ and residual $r_k(\mathbf
-a) \equiv \Phi_k - P_k(\mathbf a)$, define
+$$h_l\equiv\sum_{x,y}\omega\,p_l\sin\chi=0,\qquad l=0,\dots,L.\tag{5}$$
 
-$$F(\mathbf a) \;\equiv\; \sum_k w_k\cos\big(r_k(\mathbf a)\big) \;=\; \operatorname{Re}\Big(\sum_k z_k\,e^{-iP_k(\mathbf a)}\Big) \tag{C3}$$
+The sine of the residual, not the residual, is orthogonal to every basis function. The $l=0$ row at a maximum gives $\arg\sum_{x,y}\omega\,e^{i\chi}=0$: the weighted circular mean of the corrected phase is zero, which fixes the piston.
 
-and pose carrier removal as $\boxed{\max_{\mathbf a} F(\mathbf a)}$. This is equivalent to
-minimizing a wrap-invariant squared residual: since $w_k(1-\cos r_k) = \tfrac12 w_k\big|e^{ir_k}
--1\big|^2 = \tfrac12 w_k\big|e^{i\Phi_k}-e^{iP_k}\big|^2$ (from $|e^{i\theta}-1|^2 = 2-2\cos
-\theta$), and $\sum_k w_k$ does not depend on $\mathbf a$,
+With the matrix
 
-$$\sum_k w_k\big(1-\cos r_k\big) \;=\; \frac12\sum_k w_k\,\big|e^{i\Phi_k}-e^{iP_k}\big|^2 \;=\; \Big(\sum_k w_k\Big) - F(\mathbf a) \tag{C3b}$$
+$$S_{lm}=\sum_{x,y}\omega\cos\chi\,p_lp_m,\tag{6}$$
 
-so maximizing $F$ is exactly minimizing $\sum_k w_k|e^{i\Phi_k}-e^{iP_k}|^2$ — the squared
-Euclidean distance between two points on the unit circle, the natural distance once $\Phi$ is
-replaced by its exponential. And since $1-\cos r \approx r^2/2$ for small $r$, this *is* "minimize
-the leftover phase" — stated in the one form that is exactly wrap-invariant rather than only
-approximately so, reducing to ordinary weighted least squares on the residual once the fit is
-close (§3.3).
+minus the Hessian of $F$, each Newton step updates
 
-### 2.3 Piston-free variant
+$$\boldsymbol\eta\leftarrow\boldsymbol\eta+S^{-1}\mathbf h.\tag{7}$$
 
-Split $P = a_0 p_0 + P'(x,y;a_{1:J})$ with $P' = \sum_{j=1}^J a_j p_j$, and write $\psi_0 \equiv
-a_0 p_0$ for the (spatially uniform) piston phase. Then $F = \operatorname{Re}\big(e^{-i\psi_0}R
-\big)$ with $R \equiv \sum_k w_k e^{i(\Phi_k-P'_k)}$, which is maximized over $\psi_0$ at $\psi_0
-= \arg R$, giving $\max_{\psi_0} F = |R|$. So fitting the piston jointly with the rest is
-equivalent to profiling it out:
+$S$ is positive definite only where $\omega\cos\chi>0$ dominates, that is, near the maximum; there it tends to the weighted Gram matrix $\sum_{x,y}\omega\,p_lp_m$, and $\operatorname{cond}(S)$ is the diagnostic of the fit. The corrected phase is $\arg e^{i(\Phi-\Psi)}$.
 
-$$\max_{a_1,\dots,a_J}\ \Big|\sum_k w_k\,e^{i(\Phi_k - P'_k(\mathbf a))}\Big|, \qquad \hat\psi_0 = \arg\Big(\sum_k w_k\,e^{i(\Phi_k-P'_k)}\Big) \tag{C4}$$
+## Initialization
 
-The resultant modulus $|R|$ is the same weighted-circular-spread quantity `combine.py` and
-`reference.py` already use as a discriminant (`gauge_conventions.md`'s reference-subtraction row:
-"keep whichever has lower weighted circular spread").
+$F$ has about one local maximum per fringe along each basis direction, and Eq. (7) converges to the nearest one, so every coefficient, curvature included, must start within about half a fringe of the truth. A linear fit of the phase differences between neighbouring pixels gives such a start.
 
-### 2.4 Why not least squares on `wrap_sub(Φ, P)`
+Let $\mathcal W(x,y)$ be the $K\times K$ window of pixels centred on $(x,y)$, truncated to the field. Summing the products of horizontal and vertical neighbours over the window,
 
-`phase.backend.wrap_sub` gives a wrap-safe *difference* $\operatorname{wrap}(\Phi-P)$, but its
-square is still a discontinuous function of $\mathbf a$: as $\mathbf a$ varies continuously, any
-pixel whose residual crosses $\pm\pi$ makes $\operatorname{wrap}(\Phi-P)^2$ jump discontinuously,
-creating a spurious stationary point at the jump and making the objective's value (and hence the
-fit) depend on which branch of the wrap each pixel happened to land on. $F(\mathbf a)$ (Eq. C3) is
-the smooth surrogate that agrees with it to $O(r^2)$ (§2.2) but has no such jumps at any $\mathbf
-a$, for the reason given in §1.2. Credit where due: `phase.carrier`'s present implementation
-already works entirely on $e^{i\phi}$ and `xp.angle(...)`, never unwrapping — what §2.2 adds on
-top is a single explicit objective that its result can be shown to optimize, not the exponential
-framing itself.
+$$\begin{aligned}
+c_x(x,y)&=\sum_{(x',y')\in\mathcal W(x,y)}\zeta(x'+1,y')\,\overline{\zeta(x',y')},\\
+c_y(x,y)&=\sum_{(x',y')\in\mathcal W(x,y)}\zeta(x',y'+1)\,\overline{\zeta(x',y')},
+\end{aligned}\tag{8}$$
 
-## 3. Normal equations
+gives the phase differences and their weights
 
-### 3.1 Stationarity
+$$d_x=\arg c_x,\quad\omega_x=|c_x|,\qquad d_y=\arg c_y,\quad\omega_y=|c_y|.\tag{9}$$
 
-Since $\partial r_k/\partial a_j = -p_j(x_k)$, $\partial F/\partial a_j = \sum_k w_k p_j(x_k)
-\sin(r_k)$, so a maximizer of $F$ satisfies
+Each product in Eq. (8) is $\omega(x'+1,y')\,\omega(x',y')\,e^{i[\Phi(x'+1,y')-\Phi(x',y')]}$, so $d_x$ needs no unwrapping and approximates the weighted mean of $\Phi(x'+1,y')-\Phi(x',y')$ over the window wherever these differences are smaller than $\pi$ in magnitude and vary across the window by much less than one radian; likewise for $d_y$. For $K=1$ it is the single difference $\Phi(x+1,y)-\Phi(x,y)$. With the basis differences $p^x_l(x,y)=p_l(x+1,y)-p_l(x,y)$ and $p^y_l(x,y)=p_l(x,y+1)-p_l(x,y)$, the piston drops out, and the weighted least-squares fit of $d_x,d_y$ by $\sum_{l\ge1}\eta_lp^x_l$, $\sum_{l\ge1}\eta_lp^y_l$ has the normal equations
 
-$$\sum_k w_k\,p_j(x_k)\,\sin(r_k) = 0, \qquad j = 0,\dots,J \tag{C5}$$
+$$\sum_{m=1}^{L}\Big[\sum_{x,y}\big(\omega_xp^x_lp^x_m+\omega_yp^y_lp^y_m\big)\Big]\eta_m=\sum_{x,y}\big(\omega_xp^x_ld_x+\omega_yp^y_ld_y\big),\qquad l=1,\dots,L,\tag{10}$$
 
-the wrap-invariant analogue of "residual orthogonal to the column space": it is the *sine* of the
-residual, not the residual itself, that must be orthogonal to every basis function. Equivalently,
-in compact complex form, $\sum_k w_k\,p_j(x_k)\,e^{ir_k}$ is real for every $j$.
+each sum taken over the pixels where the neighbour exists. Eq. (4) then gives $\eta_0$.
 
-The $j=0$ row alone reduces (since $p_0$ is a positive constant) to $\sum_k w_k\sin(r_k) = 0
-\iff \arg\big(\sum_k w_k e^{ir_k}\big) \in \{0,\pi\}$; the maximizer of $F$ (rather than its
-minimizer) selects the $\arg = 0$ branch, so
+The window sum in Eq. (8) is what makes the start reliable under noise. The argument of a single noisy product wraps whenever the noise carries it past $\pm\pi$, and a wrapped value lands on the far side of zero. The differences of Eq. (9) with $K=1$ are therefore biased towards zero gradient, and so is the fit of Eq. (10). The bias is a small fraction of the gradient, but $\Psi$ accumulates the gradient across the whole field, so the error at the field edge grows with the field size and can exceed the half fringe the start allows. Summing the complex products first averages the noise on the circle, where nothing wraps, and the argument is taken once, of a sum whose relative noise is about $K$ times smaller. For the same reason a sample-phase edge inside a window lowers $\omega_x$ or $\omega_y$ instead of producing a wrapped difference. The price is resolution: $d_x,d_y$ describe the gradient averaged over the window, so $K$ must be small enough that the gradient of $\Phi$ varies little across one window.
 
-$$\arg\Big(\sum_k w_k\,e^{ir_k}\Big) = 0 \tag{C5b}$$
+Differencing amplifies noise and weights the pixels less well than Eq. (3), so Eq. (10) serves only as the start; a few steps of Eq. (7) reach the maximum of $F$.
 
-— the weighted circular mean of the demodulated field set to zero, exactly the piston convention
-already recorded for `remove_carrier` in `gauge_conventions.md`, and the direct spatial analogue
-of `aia.md`'s phase-origin pin $\delta_1=0$ for the temporal piston.
+**Subsampled start.** The start needs only half-fringe accuracy, so it can be computed on every $s$-th pixel in each direction, with $\zeta$ and $p_0,\dots,p_L$ sampled there, not rebuilt. Eqs. (8)–(10) and (4) then apply to that grid, whose neighbours are $s$ pixels apart, so the phase must change by less than $\pi$ over $s$ pixels. Steps of Eq. (7) on the same grid reach the maximum of $F$ restricted to it, which differs from the full-grid maximum only by noise and so lies well inside its half-fringe basin; one or two steps of Eq. (7) on the full grid finish the fit. The costly full-grid passes are thereby reduced to those final steps.
 
-### 3.2 Curvature and the Newton step
+## Identifiability
 
-Differentiating Eq. (C5) once more, $\partial^2F/\partial a_j\partial a_l = -\sum_k w_k\cos(r_k)
-\,p_j p_l$. Writing $g_j \equiv \sum_k w_k\,p_j(x_k)\sin(r_k)$ for the gradient and
+- **Piston.** Fixed by Eq. (4), equivalently the $l=0$ row of Eq. (5).
+- **Aliasing.** On the pixel grid, $\eta$ and $\eta'$ give the same data when $\Psi-\Psi'$ is a multiple of $2\pi$ at every pixel; a tilt, for example, is defined only modulo one cycle per pixel. Among carrier fields with
+  $$\max_{x,y}|\nabla\Psi|<\pi\ \text{rad/pixel},\tag{11}$$
+  the fit is unique up to the piston (Appendix A).
+- **Sample phase.** Any part of $\phi$ in the span of $p_1,\dots,p_L$ is removed with the carrier. $M$ is a modelling choice, not a fit-quality setting.
+- **Sign.** Under $(\Phi,\delta_n)\to(-\Phi,-\delta_n)$ (`aia.md`, "Identifiability and gauge"), every $\eta_l$ changes sign. Carrier removal does not resolve this branch; maps to be compared must be brought to the same branch first.
 
-$$H_{jl} \equiv \sum_k w_k\cos(r_k)\,p_j(x_k)\,p_l(x_k) \tag{C6}$$
+## Relation to AIA and VP-AIA
 
-for (minus) the Hessian, a Newton step toward the maximizer solves
+By the frame-mean convention of `vp_aia.md`, a phase-step pattern shared by all frames belongs to $\Phi$, so it is part of what carrier removal fits. When the step-error modes $H_j$ lie in the span of $p_1,\dots,p_L$, that shared pattern is removed with the carrier.
 
-$$\boxed{H\,\Delta\mathbf a = \mathbf g} \tag{C7}$$
+AIA applied to data with $\Delta_n\not\equiv0$ biases $\Phi$ (`aia.md`, "Starting point"). Carrier removal takes out only the part of that bias in the span of the basis, and then the fitted $\boldsymbol\eta$ no longer describes the instrument alone. VP-AIA removes the bias to first order before carrier removal.
 
-$H$ is a $\cos(r)$-**weighted** Gram matrix of the basis — the direct structural analogue of
-`sf_aia.md` Eq. (E1)'s $w_n^2$-weighted $G^{(n)}$ — and inherits the same warning
-given there (§8.3): orthonormal under the plain (unweighted) field inner product, which
-$\{p_j\}$ is by construction (§1.3), does **not** imply orthogonal under this weight. Define
+## Appendix A. Derivations
 
-$$\kappa_c \equiv \operatorname{cond}(H) \tag{C8}$$
+**Chord distance.** From $|e^{i\theta}-1|^2=2-2\cos\theta$,
 
-as the per-round diagnostic. $H$ is positive definite only where $w_k\cos(r_k) > 0$ dominates; in
-the small-residual limit $H \to \sum_k w_k\,p_j p_l$, so the system is best conditioned exactly
-where the current fit is already close, and can be indefinite far from it (§4.4).
+$$\sum_{x,y}\omega(1-\cos\chi)=\tfrac12\sum_{x,y}\omega\,|e^{i\Phi}-e^{i\Psi}|^2=\sum_{x,y}\omega-F(\boldsymbol\eta),\tag{A1}$$
 
-### 3.3 The linearized/IRLS reading
+and $\sum_{x,y}\omega$ does not depend on $\boldsymbol\eta$. For small $\chi$, $1-\cos\chi\approx\chi^2/2$.
 
-Substituting $\sin(r) \to r$, $\cos(r) \to 1$ (small-residual limit) turns Eq. (C7) into
-$\sum_k w_k p_j p_l\,\Delta a_l = \sum_k w_k p_j r_k$ — the ordinary weighted least-squares
-projection of $\operatorname{wrap}(\Phi-P)$ onto $\{p_j\}$. This is why a "wrap the residual,
-least-squares fit the wrapped residual, repeat" loop works at all once it is close to converged:
-it is the linearization of Eq. (C7), differing from the exact Newton system only in dropping the
-$\sin/\cos$ weighting of Eq. (C6).
+**Piston profile.** With $p_0=1$, $F=\operatorname{Re}\big(e^{-i\eta_0}R\big)$ for $R=\sum_{x,y}\omega\,e^{i(\Phi-\Psi')}$, maximized at $\eta_0=\arg R$ with value $|R|$, which is Eq. (4).
 
-## 4. Identifiability and ambiguity
+**Gradient and Hessian.** Since $\partial\chi/\partial\eta_l=-p_l$,
 
-1. **Piston mod $2\pi$.** Pinned by §3.1's $j=0$ row (Eq. C5b) — the global piston is fixed by
-   the same weighted-circular-mean convention already in `gauge_conventions.md`.
-2. **Continuum uniqueness.** Two coefficient vectors $\mathbf a \ne \mathbf a'$ give identical
-   $F$ for every possible $\Phi$ only if $P(\cdot;\mathbf a) - P(\cdot;\mathbf a')$ is an integer
-   multiple of $2\pi$ at *every* point of the field — and on a connected domain, a polynomial
-   with that property (continuous, taking only values in $2\pi\mathbb Z$) must be a constant. So
-   away from the piston (item 1), degrees $\ge 1$ are unique in the continuum.
-3. **Grid aliasing.** On the actual integer-pixel grid, item 2's argument only has to hold at
-   integer $(x,y)$, not everywhere — a strictly weaker condition, and the one that actually
-   matters. A pure tilt already shows this: $e^{i2\pi f_x x}$ is unchanged by $f_x \to f_x+1$ at
-   integer $x$, so a linear coefficient is identifiable only modulo one cycle/pixel
-   (`gauge_conventions.md`'s existing `carrier.py` row). A **sufficient** condition ruling this
-   out at any degree, the pointwise multi-dimensional Nyquist bound already invoked informally in
-   `phase.carrier._estimate_curvature`'s docstring (local instantaneous frequency description):
-   $$\max_{x,y}\,\big|\nabla P(x,y;\mathbf a)\big| < \pi \ \text{rad/pixel} \tag{C9}$$
-   i.e. $P$ changes by less than half a cycle between neighbouring pixels everywhere on the
-   field. This is sufficient, not necessary or tight — it is the condition under which no alias
-   of *any* degree $\le M$ can reproduce the same sampled data.
-4. **Non-convexity.** $F(\mathbf a) \le \sum_k w_k$, with roughly one local maximum per fringe
-   swept along each basis direction once Eq. (C9) is violated anywhere over the search range. A
-   Newton step from Eq. (C7) only finds the *nearest* maximum; an initializer must land within
-   about half a fringe of the truth. This — not the fit itself — is what the FFT peak search in
-   the current `remove_carrier` is genuinely for.
-5. **Object/carrier degeneracy.** Any component of the true $\phi(x,y)$ that happens to lie in
-   $\operatorname{span}\{p_1,\dots,p_J\}$ is removed along with the carrier, irreducibly — Eq.
-   (C0) shows $\phi$ and $\phi_{\text{carrier}}$ enter $\Phi$ identically, so nothing in the data
-   can attribute a low-order component to one rather than the other. $M$ is therefore a
-   *modelling* choice trading carrier removal against sample-phase removal, not a fit-quality
-   knob to raise until the residual stops shrinking.
-6. **Sign branch.** Under $(\Phi,\delta)\to(-\Phi,-\delta)$ (`aia.md`'s cosine-is-even ambiguity,
-   restated in `gauge_conventions.md`), every $a_j$ flips sign along with $\Phi$; nothing in
-   §2–3 resolves it, consistent with `combine.py` running its sign-branch discriminant on the raw
-   maps *before* carrier removal.
+$$\frac{\partial F}{\partial\eta_l}=\sum_{x,y}\omega\,p_l\sin\chi,\qquad
+\frac{\partial^2F}{\partial\eta_l\,\partial\eta_m}=-\sum_{x,y}\omega\cos\chi\,p_lp_m,\tag{A2}$$
 
-## 5. What this supersedes
+which give Eqs. (5)–(7). Replacing $\sin\chi\to\chi$ and $\cos\chi\to1$, with $\chi$ wrapped to $(-\pi,\pi]$, turns Eq. (7) into the weighted least-squares fit of the wrapped residual onto the basis: the familiar wrap-and-refit loop is the linearization of Eq. (7). Least squares on the wrapped residual itself is not a substitute for Eq. (3), because the wrapped residual jumps whenever a pixel crosses $\pm\pi$, whereas $F$ is smooth in $\boldsymbol\eta$.
 
-Today's `phase.carrier.remove_carrier` runs three sequential stages that optimize no single
-objective: an FFT peak search for a coarse tilt; a closed-form but gradient-domain refine
-($\arg\sum_k w\,z_{k+1}\overline{z_k}$ over neighbouring-pixel pairs, not the field-wide resultant
-of Eq. C4); and, for curvature, a block-wise regression of per-block local frequencies, run
-*before* the final tilt pass rather than jointly with it, with accuracy set by the essentially
-arbitrary `n_blocks` grid size, and hard-wired to degree $\le 2$ in raw monomials about pixel
-$(0,0)$. Sections 2–3 replace all of it with one objective (Eq. C3) at arbitrary degree $M$,
-fit jointly over every coefficient by Eq. (C7) — which demotes the FFT peak search to exactly
-what item 4 of §4 says it is good for, a starting point for the Newton iteration, not the
-estimate itself.
-
-One consequence for the existing gauge table: `gauge_conventions.md`'s `remove_carrier` row
-records the origin as pixel $(0,0)$ with unnormalized $x,y$ — different from the centroid,
-unit-scaled convention §1.3 inherits from SF-AIA. Adopting §1.3's basis resolves that
-clash in favour of SF-AIA's convention, once the code follows this derivation.
-
-### 5.1 Reading `CarrierResult` against this section
-
-Read-only mapping from today's output to this document's notation, not a claim that the numbers
-agree: `kx, ky` (rad/pixel) and `fx, fy` (cycles/pixel, `kx = 2π·fx`) are the present code's tilt
-estimate; `kxx, kyy, kxy` (rad/pixel²) its curvature estimate; `piston` its constant offset. All
-correspond to *some* linear combination of the $a_j$ of Eq. (C1) at $M=2$ — but not numerically,
-since the two use different bases, a different coordinate origin, and different scaling. They are
-comparable only through the reconstructed field $P(x,y)$ each produces, never
-coefficient-by-coefficient.
-
-## 6. Relation to SF-AIA
-
-The carrier and the phase-step error field $\Delta_n(x,y)$ occupy the *same* polynomial span
-$\{p_1,\dots,p_J\}$: by `sf_aia.md` Eq. (T3b), the frame-mean of the SF-AIA
-coefficients $\bar c_j \equiv \langle c_{jn}\rangle_n$ is, by construction, indistinguishable
-from — and by convention *is* treated as — part of $\phi_{\text{carrier}}$, not the phase-step error field.
-So a degree-$M$ carrier removal and a degree-$M$ SF-AIA fit are not independent quantities:
-`StepFieldParam.coeffs`, reported un-gauge-fixed per `gauge_conventions.md`, carries a carrier
-piece that a subsequent carrier-removal fit (this document) would remove a second time from
-$\Phi$.
-
-`sf_aia.md` §5.4/§11 show an *uncorrected* phase-step error field biases the recovered $\Phi$ by
-a ramp plus a second harmonic, and already call the ramp harmless "since that is exactly the
-functional form of $\phi_{\text{carrier}}$" — removed along with it. Sections 2–3 here make that
-claim precise in both directions: at $M\ge1$ the ramp lies in $\operatorname{span}\{p_j\}$ and is
-absorbed into $a_j$ exactly by Eq. (C7), so the fitted carrier coefficients are *not* a clean
-instrumental diagnostic once an uncorrected phase-step error field is present upstream. The $2\Phi$-harmonic
-half of that same bias is **not** in the polynomial span and survives carrier removal untouched.
-
-## 7. Summary table
-
-| Quantity | Definition | Eq |
-|---|---|---|
-| Fitted carrier field | $P(x,y;\mathbf a) = \sum_{j=0}^J a_j\,p_j(x,y)$, basis from `_poly_basis` plus $p_0\equiv1/\sqrt{N_p}$ | C1 |
-| Weighted complex field | $z_k = w_k e^{i\Phi_k}$; $= u_k - iv_k$ when $w_k=b_k$ | C2 |
-| Objective | $F(\mathbf a) = \sum_k w_k\cos(\Phi_k-P_k) = \operatorname{Re}\sum_k z_k e^{-iP_k}$, maximize | C3 |
-| Equivalent minimization | $\sum_k w_k\vert e^{i\Phi_k}-e^{iP_k}\vert^2 / 2 = \sum_k w_k - F(\mathbf a)$ | C3b |
-| Piston-profiled objective | $\max\vert\sum_k w_k e^{i(\Phi_k-P'_k)}\vert$, $\hat\psi_0=\arg(\cdot)$ | C4 |
-| Stationarity | $\sum_k w_k p_j \sin(r_k)=0$, all $j$ | C5 |
-| Piston convention | $\arg\big(\sum_k w_k e^{ir_k}\big)=0$ | C5b |
-| Newton system | $H_{jl}=\sum_k w_k\cos(r_k)p_jp_l$, $g_j=\sum_k w_k p_j\sin(r_k)$, $H\Delta\mathbf a=\mathbf g$ | C6/C7 |
-| Conditioning | $\kappa_c=\operatorname{cond}(H)$ | C8 |
-| Identifiability (sufficient) | $\max\vert\nabla P\vert < \pi$ rad/pixel | C9 |
-
-## 8. Assumptions used
-
-1. **A converged solve.** $\Phi(x,y)$ (and, where used, $b(x,y)$/$u,v$) come from a piston-model
-   AIA or SF-AIA solve already consistent with `interference_model.md` Eq. (17) —
-   this document treats $\Phi$ as given data, not as something it re-derives.
-2. **The carrier is genuinely low-order.** $\phi_{\text{carrier}}(x,y)$ (and whatever of
-   $\phi,\phi_{\text{inst}}$ is fit alongside it) is well approximated by a degree-$\le M$
-   polynomial — §4.5's degeneracy is the cost of this assumption being too generous.
-3. **Weight tracks reliability.** $w_k \ge 0$, and larger where the fringe is trustworthy (higher
-   modulation, inside a valid mask) — required for Eq. (C5)/(C7)'s stationarity to weight the fit
-   sensibly, not merely for it to be well defined.
-4. **Sub-Nyquist sampling of the fitted field.** Eq. (C9) — needed for §4's identifiability
-   argument and for the FFT-based initializer (§4.4) to land in the correct basin.
-5. **Sign branch already resolved.** §4.6 — this document does not fix $(\Phi,\delta) \to
-   (-\Phi,-\delta)$; that is `combine.py`/`reference.py`'s responsibility, run beforehand.
+**Uniqueness under Eq. (11).** Let $\Psi$ and $\Psi'$ both satisfy Eq. (11) and agree modulo $2\pi$ at every pixel, and let $D=\Psi-\Psi'$. If $D$ is not the same multiple of $2\pi$ at all pixels, it differs by at least $2\pi$ between two neighbouring pixels, so somewhere on the segment between them $|\nabla D|\ge2\pi$. Then $|\nabla\Psi|+|\nabla\Psi'|\ge2\pi$ there, contradicting Eq. (11). Hence $D$ is a constant multiple of $2\pi$, a piston.

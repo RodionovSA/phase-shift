@@ -1,322 +1,158 @@
 # src/phase_shift/carrier.py
-"""Estimating and removing the spatial carrier and defocus of a phase map."""
+"""Estimating and removing a low-order carrier from a wrapped phase map."""
 
-import cmath
-import math
 import warnings
 from dataclasses import dataclass
+from types import ModuleType
 
 import numpy as np
 
-from .backend import get_array_module, to_device
-from .utils import _estimation_weight
+from .backend import Precision, asnumpy, get_array_module, to_device
+from .basis import spatial_basis
+from .utils import _estimation_weight, wrap
 
 
 @dataclass
 class CarrierResult:
     """Output of :func:`remove_carrier`.
 
-    Conventions follow ``docs/gauge_conventions.md`` §"Carrier removal": the
-    origin is pixel ``(0, 0)`` with unnormalized ``x, y``, and the output's
-    weighted circular mean is zero.
+    Conventions follow ``docs/gauge_conventions.md`` §"Carrier removal".
 
     Attributes
     ----------
     phi : np.ndarray, shape (H, W)
-        Phase with the carrier, the curvature term (when fitted), and the
-        piston removed, in radians, wrapped to ``[-pi, pi]``.
-    kx, ky : float
-        Carrier spatial frequency along the column (x) and row (y) axes, in
-        rad/pixel.
-    fx, fy : float
-        The same carrier in cycles/pixel, ``kx = 2*pi*fx``.
-    kxx, kyy, kxy : float
-        Curvature coefficients of ``kxx*x^2 + kyy*y^2 + kxy*x*y``, in
-        rad/pixel^2. All ``0.0`` when ``defocus=False``.
+        Phase with the carrier removed, in radians, wrapped to ``[-pi, pi]``.
+        Its weighted circular mean is zero.
+    eta : np.ndarray, shape (L+1,)
+        Carrier coefficients of ``docs/carrier_removal.md`` Eq. (1), piston
+        first, float64.
     piston : float
-        Constant phase offset removed after demodulation, in radians.
+        ``eta[0]``, in radians.
+    n_iter : int
+        Newton steps taken on the full grid.
+    cond : float
+        Condition number of ``S`` (Eq. 6) at the last step; ``inf`` if ``S``
+        is not positive definite.
     """
 
     phi: np.ndarray
-    kx: float
-    ky: float
-    fx: float
-    fy: float
-    kxx: float
-    kyy: float
-    kxy: float
+    eta: np.ndarray
     piston: float
+    n_iter: int
+    cond: float
 
 
-def _next_smooth(n: int, factors: tuple[int, ...] = (2, 3, 5, 7)) -> int:
-    """Return the smallest ``m >= n`` whose prime factors all lie in ``factors``.
+def _carrier_basis(H: int, W: int, degree: int, xp: ModuleType,
+                   p: Precision) -> np.ndarray:
+    """Basis ``p_0 = 1, p_1, ..., p_L`` of ``docs/carrier_removal.md`` §"Basis".
 
-    Parameters
-    ----------
-    n : int
-        Lower bound, in samples.
-    factors : tuple of int, default (2, 3, 5, 7)
-        Allowed prime factors.
+    The ``"poly"`` rows are rescaled to unit mean square, the norm of ``p_0``.
 
     Returns
     -------
-    int
-        FFT length to zero-pad to.
+    np.ndarray, shape (L+1, H, W), ``p.accum``
     """
-    k = n
-    while True:
-        m = k
-        for f in factors:
-            while m % f == 0:
-                m //= f
-        if m == 1:
-            return k
-        k += 1
+    rows = spatial_basis(H, W, "poly", xp, p, degree=degree)                # (L, H*W)
+    P = xp.empty((rows.shape[0] + 1, H * W), dtype=p.accum)
+    P[0] = 1
+    P[1:] = rows * np.sqrt(H * W)
+    return P.reshape(-1, H, W)
 
 
-def _coarse_peak(field: np.ndarray) -> tuple[float, float]:
-    """Locate the dominant peak of ``field``'s spectrum, to one FFT bin.
+def _window_sum(a: np.ndarray, K: int) -> np.ndarray:
+    """Sum of ``a`` over the ``K x K`` window centred on each pixel, truncated
+    to the array, as in ``docs/carrier_removal.md`` Eq. (8)."""
+    xp = get_array_module(a)
+    h, w = a.shape
+    r = K // 2
+    c = xp.zeros((h + K, w + K), dtype=a.dtype)
+    c[r + 1:r + 1 + h, r + 1:r + 1 + w] = a
+    c = c.cumsum(0).cumsum(1)
+    return c[K:K + h, K:K + w] - c[:h, K:K + w] - c[K:K + h, :w] + c[:h, :w]
 
-    The transform is zero-padded to an efficient length (:func:`_next_smooth`).
+
+def _start(zeta: np.ndarray, P: np.ndarray, window: int) -> np.ndarray:
+    """Start from window-summed neighbour products, ``docs/carrier_removal.md``
+    Eqs. (8)-(10), with the piston from Eq. (4).
 
     Parameters
     ----------
-    field : np.ndarray, shape (H, W)
-        Complex field to transform.
+    zeta : np.ndarray, shape (h, w), complex
+        Weighted complex field, Eq. (2).
+    P : np.ndarray, shape (L+1, h, w)
+        Basis sampled on the same grid.
+    window : int
+        Window size ``K``.
 
     Returns
     -------
-    fy, fx : float
-        Peak frequency along the row and column axes, in cycles/pixel.
+    np.ndarray, shape (L+1,), float64
     """
-    xp = get_array_module(field)
-    H, W = field.shape
-    Hp, Wp = _next_smooth(H), _next_smooth(W)
-    if (Hp, Wp) != (H, W):
-        padded = xp.zeros((Hp, Wp), dtype=field.dtype)
-        padded[:H, :W] = field
-    else:
-        padded = field
-    F = xp.fft.fft2(padded)
-    iy, ix = xp.unravel_index(xp.argmax(xp.abs(F)), F.shape)
-    fy = float(xp.fft.fftfreq(Hp)[int(iy)])
-    fx = float(xp.fft.fftfreq(Wp)[int(ix)])
-    return fy, fx
+    xp = get_array_module(zeta)
+    L1 = P.shape[0]
+    eta = np.zeros(L1)
+    if L1 > 1:
+        c_x = _window_sum(zeta[:, 1:] * zeta[:, :-1].conj(), window)         # (h, w-1)
+        c_y = _window_sum(zeta[1:, :] * zeta[:-1, :].conj(), window)         # (h-1, w)
+        P_x = (P[1:, :, 1:] - P[1:, :, :-1]).reshape(L1 - 1, -1)
+        P_y = (P[1:, 1:, :] - P[1:, :-1, :]).reshape(L1 - 1, -1)
+        w_x, w_y = xp.abs(c_x).ravel(), xp.abs(c_y).ravel()
+        G = (P_x * w_x) @ P_x.T + (P_y * w_y) @ P_y.T
+        r = P_x @ (w_x * xp.angle(c_x).ravel()) + P_y @ (w_y * xp.angle(c_y).ravel())
+        eta[1:] = np.linalg.solve(asnumpy(G), asnumpy(r))
+    psi = xp.asarray(eta, dtype=P.dtype) @ P.reshape(L1, -1)
+    eta[0] = float(xp.angle(xp.sum(zeta.ravel() * xp.exp(-1j * psi))))
+    return eta
 
 
-def _estimate_tilt(c: np.ndarray, w: np.ndarray, window: bool,
-                   refine_iters: int) -> tuple[float, float]:
-    """Estimate the dominant linear carrier of a complex field.
+def _newton(zeta: np.ndarray, P: np.ndarray, eta: np.ndarray,
+            max_iter: int) -> tuple[np.ndarray, int, float, bool]:
+    """Newton steps of ``docs/carrier_removal.md`` Eqs. (5)-(7).
 
-    A coarse FFT peak (:func:`_coarse_peak`) is refined on the vector-averaged
-    phase difference of neighboring pixels,
-    ``Sx = sum(w_pair * c[:, 1:] * conj(c[:, :-1]))`` along columns and ``Sy``
-    along rows. ``Sx``/``Sy`` do not depend on the current estimate, so they
-    are formed once and the refinement iterates on their angles, which keeps
-    the estimate wrap-safe. See ``docs/carrier_removal.md`` §5.
-
-    Parameters
-    ----------
-    c : np.ndarray, shape (H, W)
-        Complex field, ``exp(1j * phi)``.
-    w : np.ndarray, shape (H, W)
-        Per-pixel estimation weight.
-    window : bool
-        Apply a 2-D Hann window before the coarse FFT.
-    refine_iters : int
-        Maximum number of refinement iterations.
+    Stops when no coefficient moves by more than the square root of the
+    basis dtype's resolution.
 
     Returns
     -------
-    fx, fy : float
-        Carrier frequency along the column and row axes, in cycles/pixel.
+    eta : np.ndarray, shape (L+1,), float64
+    n_iter : int
+        Steps taken.
+    cond : float
+        Condition number of ``S`` at the last step; ``inf`` if ``S`` is not
+        positive definite.
+    converged : bool
     """
-    xp = get_array_module(c, w)
-    H, W = c.shape
-    if window and H > 1 and W > 1:
-        win = xp.outer(xp.hanning(H), xp.hanning(W))
-    else:
-        win = xp.ones((H, W))
-    fy, fx = _coarse_peak(w * c * win)
-
-    Sx = Sy = None
-    if W > 1:
-        wpx = w[:, 1:] * w[:, :-1]
-        Sx = complex(xp.sum(wpx * c[:, 1:] * xp.conj(c[:, :-1])))
-    if H > 1:
-        wpy = w[1:, :] * w[:-1, :]
-        Sy = complex(xp.sum(wpy * c[1:, :] * xp.conj(c[:-1, :])))
-    ax = cmath.phase(Sx) if Sx is not None else 0.0
-    ay = cmath.phase(Sy) if Sy is not None else 0.0
-
-    two_pi = 2 * math.pi
-    for _ in range(refine_iters):
-        dfx = cmath.phase(cmath.exp(1j * (ax - two_pi * fx))) / two_pi if Sx is not None else 0.0
-        dfy = cmath.phase(cmath.exp(1j * (ay - two_pi * fy))) / two_pi if Sy is not None else 0.0
-        fx += dfx
-        fy += dfy
-        if abs(dfx) < 1e-8 and abs(dfy) < 1e-8:
+    xp = get_array_module(zeta)
+    P_f = P.reshape(P.shape[0], -1)                                          # (L+1, h*w)
+    z_f = zeta.ravel()
+    tol = float(np.sqrt(np.finfo(P.dtype).eps))
+    converged = False
+    for n_iter in range(1, max_iter + 1):
+        d = z_f * xp.exp(-1j * (xp.asarray(eta, dtype=P.dtype) @ P_f))      # omega e^{i chi}
+        h = asnumpy(P_f @ d.imag)
+        S = asnumpy((P_f * d.real) @ P_f.T)
+        step = np.linalg.solve(S, h)
+        eta = eta + step
+        if np.abs(step).max() < tol:
+            converged = True
             break
-
-    return fx, fy
-
-
-def _estimate_curvature(c: np.ndarray, w: np.ndarray, window: bool, refine_iters: int,
-                        n_blocks: int) -> tuple[float, float, float]:
-    """Estimate quadratic curvature from the local tilt of a block grid.
-
-    For ``phi = piston + kx*x + ky*y + kxx*x^2 + kyy*y^2 + kxy*x*y`` the local
-    frequency is linear in position,
-    ``fx(x, y) = fx0 + (kxx/pi)*x + (kxy/(2*pi))*y`` and
-    ``fy(x, y) = fy0 + (kxy/(2*pi))*x + (kyy/pi)*y``. The field is split into
-    an ``n_blocks x n_blocks`` grid of equal-size blocks, cropped to the
-    largest size divisible by ``n_blocks``; every block's local frequency is
-    estimated as in :func:`_estimate_tilt`, batched over one FFT, and the two
-    relations above are fitted jointly by least squares over all blocks.
-
-    Parameters
-    ----------
-    c : np.ndarray, shape (H, W)
-        Complex field, ``exp(1j * phi)``.
-    w : np.ndarray, shape (H, W)
-        Per-pixel estimation weight.
-    window : bool
-        Apply a 2-D Hann window before each block's coarse FFT.
-    refine_iters : int
-        Number of refinement iterations per block.
-    n_blocks : int
-        Grid size along each axis.
-
-    Returns
-    -------
-    kxx, kyy, kxy : float
-        Curvature coefficients, in rad/pixel^2; all ``0.0`` if the fit is
-        under-determined.
-
-    Warns
-    -----
-    UserWarning
-        If the blocks are smaller than 2x2, or fewer than 4 of them carry
-        usable weight for the 5-unknown fit.
-    """
-    xp = get_array_module(c, w)
-    H, W = c.shape
-    bh, bw = H // n_blocks, W // n_blocks
-    if bh < 2 or bw < 2:
-        warnings.warn(
-            "remove_carrier: n_blocks too large for this image size; "
-            "cannot fit a curvature term, skipping it (kxx=kyy=kxy=0). "
-            "Try a smaller n_blocks.",
-            stacklevel=3,
-        )
-        return 0.0, 0.0, 0.0
-    Hc, Wc = bh * n_blocks, bw * n_blocks
-
-    def to_blocks(a: np.ndarray) -> np.ndarray:
-        """Reshape ``a`` into ``(n_blocks**2, bh, bw)`` equal-size blocks."""
-        return (a[:Hc, :Wc].reshape(n_blocks, bh, n_blocks, bw)
-                 .transpose(0, 2, 1, 3).reshape(n_blocks * n_blocks, bh, bw))
-
-    c_b = to_blocks(c)
-    w_b = to_blocks(w)
-    nblk = n_blocks * n_blocks
-
-    win = (xp.outer(xp.hanning(bh), xp.hanning(bw)) if (window and bh > 1 and bw > 1)
-           else xp.ones((bh, bw)))
-
-    # Coarse peak per block, from one padded batched FFT.
-    bhp, bwp = _next_smooth(bh), _next_smooth(bw)
-    field = w_b * c_b * win
-    if (bhp, bwp) != (bh, bw):
-        padded = xp.zeros((nblk, bhp, bwp), dtype=field.dtype)
-        padded[:, :bh, :bw] = field
-    else:
-        padded = field
-    F = xp.fft.fft2(padded, axes=(1, 2))
-    Fabs = xp.abs(F).reshape(nblk, -1)
-    peak = xp.argmax(Fabs, axis=1)
-    iy, ix = peak // bwp, peak % bwp
-    fy = xp.fft.fftfreq(bhp)[iy].astype(xp.float64)                      # (nblk,)
-    fx = xp.fft.fftfreq(bwp)[ix].astype(xp.float64)                      # (nblk,)
-
-    # Per-block Sx/Sy and refinement, vectorized over the block axis.
-    have_x, have_y = bw > 1, bh > 1
-    if have_x:
-        wpx = w_b[:, :, 1:] * w_b[:, :, :-1]
-        Sx = (wpx * c_b[:, :, 1:] * xp.conj(c_b[:, :, :-1])).sum(axis=(1, 2))
-        ax = xp.angle(Sx)
-    if have_y:
-        wpy = w_b[:, 1:, :] * w_b[:, :-1, :]
-        Sy = (wpy * c_b[:, 1:, :] * xp.conj(c_b[:, :-1, :])).sum(axis=(1, 2))
-        ay = xp.angle(Sy)
-
-    two_pi = 2 * xp.pi
-    for _ in range(refine_iters):
-        if have_x:
-            fx = fx + xp.angle(xp.exp(1j * (ax - two_pi * fx))) / two_pi
-        if have_y:
-            fy = fy + xp.angle(xp.exp(1j * (ay - two_pi * fy))) / two_pi
-
-    block_row = xp.repeat(xp.arange(n_blocks), n_blocks)
-    block_col = xp.tile(xp.arange(n_blocks), n_blocks)
-    yc = block_row.astype(xp.float64) * bh + (bh - 1) / 2.0              # (nblk,)
-    xc = block_col.astype(xp.float64) * bw + (bw - 1) / 2.0              # (nblk,)
-
-    total_w = float(w.sum())
-    floor = 0.01 * total_w / max(nblk, 1)
-    w_sum = w_b.reshape(nblk, -1).sum(axis=1)
-    usable = w_sum >= floor
-
-    n = int(xp.sum(usable))
-    if n < 4:
-        warnings.warn(
-            "remove_carrier: fewer than 4 blocks had usable weight; "
-            "cannot fit a curvature term, skipping it (kxx=kyy=kxy=0). "
-            "Try a smaller n_blocks or check weight/mask coverage.",
-            stacklevel=3,
-        )
-        return 0.0, 0.0, 0.0
-
-    xc_u, yc_u = xc[usable], yc[usable]
-    fx_u, fy_u = fx[usable], fy[usable]
-
-    # Unknowns [fx0, fy0, kxx/pi, kxy/(2*pi), kyy/pi], two rows per block.
-    M = xp.zeros((2 * n, 5), dtype=xp.float64)
-    rhs = xp.zeros(2 * n, dtype=xp.float64)
-    M[0::2, 0] = 1.0
-    M[0::2, 2] = xc_u
-    M[0::2, 3] = yc_u
-    rhs[0::2] = fx_u
-    M[1::2, 1] = 1.0
-    M[1::2, 3] = xc_u
-    M[1::2, 4] = yc_u
-    rhs[1::2] = fy_u
-    sol = xp.linalg.lstsq(M, rhs, rcond=None)[0]
-    kxx = float(np.pi * float(sol[2]))
-    kyy = float(np.pi * float(sol[4]))
-    kxy = float(2 * np.pi * float(sol[3]))
-    return kxx, kyy, kxy
+    ev = np.linalg.eigvalsh(S)
+    cond = float(ev[-1] / ev[0]) if ev[0] > 0 else np.inf
+    return eta, n_iter, cond, converged
 
 
 def remove_carrier(phi: np.ndarray, weight: np.ndarray | None = None,
-                   mask: np.ndarray | None = None, refine_iters: int = 10,
-                   window: bool = True, defocus: bool = True,
-                   n_blocks: int = 10, device: str = "auto") -> CarrierResult:
-    """Estimate and remove the spatial carrier of a wrapped phase map.
+                   mask: np.ndarray | None = None, degree: int = 2, window: int = 5,
+                   subsample: int = 4, max_iter: int = 20, device: str = "auto",
+                   precision: "str | Precision | None" = None) -> CarrierResult:
+    """Fit and remove a low-order carrier from a wrapped phase map.
 
-    Removes the linear ramp ``kx*x + ky*y``, the ``piston``, and, when
-    ``defocus`` is set, the curvature ``kxx*x^2 + kyy*y^2 + kxy*x*y`` from
-
-        ``phi = wrap(phase_obj + kx*x + ky*y
-                     + kxx*x^2 + kyy*y^2 + kxy*x*y + piston)``
-
-    All estimation runs on ``exp(1j * phi)``, so the map is never unwrapped
-    and the number of carrier fringes is unrestricted. The steps are: fit the
-    curvature from a block grid (:func:`_estimate_curvature`) and demodulate
-    it; fit the remaining tilt (:func:`_estimate_tilt`) and demodulate it;
-    remove the piston as the weighted circular mean. See
-    ``docs/carrier_removal.md`` §5 for the method and ``docs/gauge_conventions.md``
-    §"Carrier removal" for the origin, piston, and frequency conventions.
+    Maximizes ``docs/carrier_removal.md`` Eq. (3) over a polynomial carrier
+    of total degree up to ``degree`` plus a piston, working on
+    ``weight * exp(1j * phi)`` so the map is never unwrapped. The start
+    (Eqs. 8-10) and the first Newton steps (Eq. 7) run on every
+    ``subsample``-th pixel; the fit is finished on the full grid
+    (§"Subsampled start").
 
     Parameters
     ----------
@@ -324,72 +160,84 @@ def remove_carrier(phi: np.ndarray, weight: np.ndarray | None = None,
         Wrapped phase map, in radians, e.g.
         :attr:`phase_shift.result.PhaseResult.phi`.
     weight : np.ndarray, shape (H, W), optional
-        Per-pixel reliability, e.g. :attr:`phase_shift.result.PhaseResult.b`.
-        Used for estimation only; the returned ``phi`` is computed from the
-        unweighted field. Negative values are clipped to 0.
+        Per-pixel reliability ``omega``, e.g.
+        :attr:`phase_shift.result.PhaseResult.b`. Negative values are clipped
+        to 0.
     mask : np.ndarray, shape (H, W), optional
-        Pixels where it is falsey are excluded from estimation; combined with
-        ``weight``.
-    refine_iters : int, default 10
-        Maximum refinement iterations after each coarse FFT, for the
-        full-field estimate and for every block.
-    window : bool, default True
-        Apply a 2-D Hann window before each coarse FFT; skipped when the field
-        has a size-1 axis.
-    defocus : bool, default True
-        Also fit and remove the quadratic curvature term.
-    n_blocks : int, default 10
-        Grid size for the curvature estimate, used only when ``defocus`` is
-        set. Needs at least 4 blocks with usable weight; otherwise the
-        curvature is skipped with a warning.
+        Pixels where it is falsey are excluded; combined with ``weight``.
+    degree : int, default 2
+        Highest total degree ``M`` of the carrier; ``0`` removes only the
+        piston.
+    window : int, default 5
+        Window size ``K`` of Eq. (8), a positive odd number of pixels.
+    subsample : int, default 4
+        Stride of the grid the start runs on; ``1`` runs everything on the
+        full grid. The phase must change by less than ``pi`` over
+        ``subsample`` pixels.
+    max_iter : int, default 20
+        Maximum Newton steps on each grid.
     device : {"auto", "cpu", "cuda"}, default "auto"
         Device to run on; see :func:`phase_shift.backend.to_device`.
+    precision : str or Precision, optional
+        Dtypes to run in; see :class:`phase_shift.backend.Precision`.
 
     Returns
     -------
     CarrierResult
-        Flattened phase and the removed carrier, curvature, and piston.
 
     Raises
     ------
     ValueError
         If ``phi`` is not 2-D, if ``weight`` or ``mask`` does not have
-        ``phi``'s shape, if ``n_blocks`` is below 1, or if ``refine_iters`` is
-        negative.
+        ``phi``'s shape, if ``degree`` is negative, if ``window`` is not a
+        positive odd number, if ``subsample`` or ``max_iter`` is below 1, or
+        if the subsampled grid has fewer than 2 pixels along an axis.
 
     Warns
     -----
     UserWarning
-        If the curvature fit is under-determined; see
-        :func:`_estimate_curvature`.
+        If the Newton steps on the full grid do not converge, or end where
+        ``S`` is not positive definite.
     """
     if phi.ndim != 2:
         raise ValueError(f"phi must be 2-D (H, W), got shape {phi.shape}")
-    if n_blocks < 1:
-        raise ValueError(f"n_blocks must be at least 1, got {n_blocks}")
-    if refine_iters < 0:
-        raise ValueError(f"refine_iters must be non-negative, got {refine_iters}")
+    if degree < 0:
+        raise ValueError(f"degree must be >= 0, got {degree}")
+    if window < 1 or window % 2 == 0:
+        raise ValueError(f"window must be a positive odd number, got {window}")
+    if subsample < 1:
+        raise ValueError(f"subsample must be at least 1, got {subsample}")
+    if max_iter < 1:
+        raise ValueError(f"max_iter must be at least 1, got {max_iter}")
+    H, W = phi.shape
+    if -(-H // subsample) < 2 or -(-W // subsample) < 2:
+        raise ValueError(
+            f"subsample={subsample} leaves fewer than 2 pixels along an axis of "
+            f"the {H}x{W} field"
+        )
 
+    p = Precision.of(precision)
     phi = to_device(phi, device=device)
     xp = get_array_module(phi)
-    H, W = phi.shape
-    c = xp.exp(1j * phi)
     w = _estimation_weight(phi, weight, mask, device)
+    zeta = (w * xp.exp(1j * phi)).astype(np.result_type(p.accum, np.complex64))  # Eq. (2)
+    P = _carrier_basis(H, W, degree, xp, p)                                  # (L+1, H, W)
 
-    x = xp.arange(W, dtype=xp.float64)[None, :]                          # (1, W)
-    y = xp.arange(H, dtype=xp.float64)[:, None]                          # (H, 1)
+    if subsample > 1:
+        zeta_s, P_s = zeta[::subsample, ::subsample], P[:, ::subsample, ::subsample]
+        eta, *_ = _newton(zeta_s, P_s, _start(zeta_s, P_s, window), max_iter)
+    else:
+        eta = _start(zeta, P, window)
+    eta, n_iter, cond, converged = _newton(zeta, P, eta, max_iter)
 
-    kxx = kyy = kxy = 0.0
-    if defocus:
-        kxx, kyy, kxy = _estimate_curvature(c, w, window, refine_iters, n_blocks)
-        if kxx or kyy or kxy:
-            c = c * xp.exp(-1j * (kxx * x**2 + kyy * y**2 + kxy * x * y))
+    if not converged:
+        warnings.warn(f"remove_carrier: Newton steps did not converge in {max_iter} "
+                      f"iterations", stacklevel=2)
+    if not np.isfinite(cond):
+        warnings.warn("remove_carrier: the fit ended where S is not positive definite, "
+                      "so it is not at a maximum; check that the phase changes by less "
+                      "than pi over subsample pixels", stacklevel=2)
 
-    fx, fy = _estimate_tilt(c, w, window, refine_iters)
-
-    d = c * xp.exp(-1j * 2 * xp.pi * (fx * x + fy * y))
-    piston = float(xp.angle(xp.sum(w * d)))
-    d = d * xp.exp(-1j * piston)
-
-    return CarrierResult(phi=xp.angle(d), kx=2 * np.pi * fx, ky=2 * np.pi * fy,
-                         fx=fx, fy=fy, kxx=kxx, kyy=kyy, kxy=kxy, piston=piston)
+    psi = (xp.asarray(eta, dtype=p.accum) @ P.reshape(P.shape[0], -1)).reshape(H, W)
+    return CarrierResult(phi=wrap(phi - psi).astype(p.work), eta=eta,
+                         piston=float(eta[0]), n_iter=n_iter, cond=cond)

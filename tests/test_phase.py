@@ -280,32 +280,58 @@ class TestStepField:
         assert resid_fast.dtype == np.float32
         assert rms_fast == pytest.approx(rms_single, abs=1e-4)
 
-class TestCarrier:
-    def test_recovers_pure_carrier_and_curvature(self):
-        H, W = 80, 96
-        Y, X = np.mgrid[0:H, 0:W].astype(np.float64)
-        kx, ky = 0.05, -0.03
-        kxx, kyy, kxy = 2e-4, -1e-4, 5e-5
-        piston = 0.6
-        phi = np.angle(np.exp(1j * (kx * X + ky * Y + kxx * X**2 + kyy * Y**2
-                                     + kxy * X * Y + piston)))
-        r = remove_carrier(phi, defocus=True, refine_iters=10, n_blocks=6)
-        assert abs(r.kx - kx) < 1e-6
-        assert abs(r.ky - ky) < 1e-6
-        assert abs(r.kxx - kxx) < 1e-8
-        assert abs(r.kyy - kyy) < 1e-8
-        assert abs(r.kxy - kxy) < 1e-8
-        assert circ_rms_deg(r.phi, np.zeros((H, W))) < 1e-4
+def _carrier_case(H=96, W=128, sigma=0.0, seed=5):
+    """Wrapped tilt + curvature carrier, smooth modulation ``b``, complex noise."""
+    Y, X = np.mgrid[0:H, 0:W].astype(np.float64)
+    carrier = (0.3 * X - 0.2 * Y + 4e-4 * X**2 - 2e-4 * Y**2 + 1e-4 * X * Y + 0.6)
+    b = 0.6 + 0.3 * np.cos(X / W * 2.0) * np.cos(Y / H * 1.5)
+    rng = np.random.default_rng(seed)
+    noise = sigma * (rng.standard_normal((H, W)) + 1j * rng.standard_normal((H, W)))
+    zeta = b * np.exp(1j * carrier) + noise
+    return np.angle(zeta), np.abs(zeta), carrier, b
 
-    def test_defaults_match_defocus_true_call(self):
-        H, W = 64, 64
-        rng = np.random.default_rng(2)
-        phi = np.angle(np.exp(1j * (0.02 * np.arange(W))[None, :] * np.ones((H, 1))
-                              + 1j * 0.05 * rng.standard_normal((H, W))))
-        r_default = remove_carrier(phi)
-        r_explicit = remove_carrier(phi, defocus=True, refine_iters=10, n_blocks=10)
-        assert r_default.kx == r_explicit.kx
-        assert r_default.ky == r_explicit.ky
+
+class TestCarrier:
+    def test_removes_noise_free_carrier(self):
+        phi, w, _, _ = _carrier_case()
+        r = remove_carrier(phi, w, precision="double")
+        assert np.abs(r.phi).max() < 1e-8
+        assert r.eta.shape == (6,)
+        assert r.cond < 2
+
+    def test_recovers_carrier_under_noise(self):
+        phi, w, carrier, b = _carrier_case(sigma=0.3)
+        r = remove_carrier(phi, w, precision="double")
+        err = wrap(phi - r.phi - carrier)
+        err = wrap(err - np.angle(np.sum(b * np.exp(1j * err))))
+        assert np.abs(err).max() < 0.05
+
+    def test_invariant_to_2pi_wraps(self):
+        phi, w, _, _ = _carrier_case(sigma=0.1)
+        m = np.random.default_rng(6).integers(-3, 4, phi.shape)
+        r1 = remove_carrier(phi, w, precision="double")
+        r2 = remove_carrier(phi + 2 * np.pi * m, w, precision="double")
+        np.testing.assert_allclose(r1.eta, r2.eta, atol=1e-10)
+
+    def test_subsampled_start_matches_full(self):
+        phi, w, _, _ = _carrier_case(sigma=0.1)
+        r1 = remove_carrier(phi, w, subsample=1, precision="double")
+        r4 = remove_carrier(phi, w, subsample=4, precision="double")
+        assert np.abs(wrap(r1.phi - r4.phi)).max() < 1e-8
+
+    def test_degree_zero_removes_piston_only(self):
+        phi = np.full((32, 40), 2.5)
+        r = remove_carrier(phi, degree=0, precision="double")
+        assert r.eta.shape == (1,)
+        assert r.piston == pytest.approx(2.5)
+        assert np.abs(r.phi).max() < 1e-12
+
+    @pytest.mark.parametrize("kwargs", [dict(window=4), dict(window=0), dict(degree=-1),
+                                        dict(subsample=0), dict(subsample=40),
+                                        dict(max_iter=0)])
+    def test_rejects_invalid_arguments(self, kwargs):
+        with pytest.raises(ValueError):
+            remove_carrier(np.zeros((32, 40)), **kwargs)
 
 
 class TestReference:

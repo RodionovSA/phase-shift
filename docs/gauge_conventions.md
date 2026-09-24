@@ -59,9 +59,9 @@ the phase-step fit is built on.
 
 | Freedom | Convention | Where |
 |---|---|---|
-| Spatial origin for the tilt/curvature/piston split (origin-dependent — differs from the centroid convention of the step field above) | Pixel `(0,0)`, unnormalized `x,y` | `carrier.py` |
-| Global piston of the output | Weighted circular mean set to zero: `arg(Σ w·e^{iφ}) = 0` | `carrier.py` |
-| Carrier frequency `(fx,fy)`, defined only modulo 1 cycle/pixel | FFT-bin peak picks the representative; the refine step tracks the nearest branch to the current estimate | `carrier.py`; `carrier_removal.md` §4 |
+| Spatial split of the carrier into piston + low-order shape | Same `"poly"` basis as the step field above (centroid origin, coordinates scaled to ≈`[-1,1]`, zero-mean, orthonormalized in ascending degree), plus the constant `p_0 = 1` | `carrier.py`; `carrier_removal.md` §"Basis" |
+| Global piston of the output | Weighted circular mean set to zero: `arg(Σ w·e^{iφ}) = 0` | `carrier.py`; `carrier_removal.md` Eq. 4 |
+| Carrier defined only modulo `2π` per pixel (aliasing; a tilt only modulo 1 cycle/pixel) | The representative with `max|∇Ψ| < π` rad/pixel, reached from the neighbour-difference start | `carrier.py`; `carrier_removal.md` Eqs. 8–11 |
 
 ## Reference subtraction (`subtract_reference`)
 
