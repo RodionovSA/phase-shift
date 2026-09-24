@@ -27,13 +27,32 @@ class TestScene:
         eta = np.array([3.0, -2.0])
         alpha = np.linspace(1.0, 0.9, N)
         g = random_dips(N, 0.5, 0.4, rng=1)
-        s = _scene(coeffs=coeffs, eta=eta, alpha=alpha, g=g)
+        s = _scene(coeffs=coeffs, carrier=eta, alpha=alpha, g=g)
         a = s.I1_map + s.I2_map
         b = 2 * s.gamma_map * np.sqrt(s.I1_map * s.I2_map)
         psi = s.phi + carrier_map(H, W, eta) + step_field(H, W, s.piston, coeffs)
         al, gl = alpha[:, None, None], g[:, None, None]
         expected = al * (a + gl * b * np.cos(psi))
         np.testing.assert_allclose(s.ideal(), expected, rtol=1e-12)
+
+    def test_carrier_map_equals_coefficients(self):
+        eta = [3.0, -2.0, 1.0, 0.5, -0.5]
+        from_coeffs = _scene(carrier=eta).ideal()
+        np.testing.assert_allclose(_scene(carrier=carrier_map(H, W, eta)).ideal(), from_coeffs)
+
+    def test_arbitrary_carrier_map(self):
+        carrier = np.random.default_rng(2).random((1, H, W))
+        s = _scene(carrier=carrier)
+        np.testing.assert_allclose(s.ideal(), _scene(phi=s.phi + carrier).ideal())
+
+    @pytest.mark.parametrize("carrier, match", [
+        (np.zeros((H, W)), "carrier must be coefficients"),
+        (np.zeros((1, H, W + 1)), "carrier must have shape"),
+        (np.zeros(3), "number of coefficients must be"),
+    ])
+    def test_rejects_bad_carrier(self, carrier, match):
+        with pytest.raises(ValueError, match=match):
+            _scene(carrier=carrier).ideal()
 
     def test_defaults_are_noise_free_uniform_piston(self):
         s = _scene()

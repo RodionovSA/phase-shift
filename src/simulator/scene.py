@@ -3,6 +3,7 @@
 
 from dataclasses import dataclass
 from functools import cached_property
+from types import ModuleType
 
 import numpy as np
 
@@ -39,9 +40,9 @@ class Scene:
     coeffs : np.ndarray, shape (J, N), optional
         Step-field coefficients, see :func:`simulator.step_field`. None means
         a uniform piston step.
-    eta : np.ndarray, shape (L,), optional
-        Carrier coefficients, see :func:`simulator.carrier_map`. None means no
-        carrier.
+    carrier : np.ndarray, shape (L,) or (1, H, W), optional
+        Carrier as coefficients for :func:`simulator.carrier_map`, or as a
+        phase map in radians. None means no carrier.
     alpha, g : np.ndarray, shape (N,), optional
         Source-power and contrast factors per frame. None means ones.
     noise : NoiseModel, optional
@@ -54,7 +55,7 @@ class Scene:
     phi: np.ndarray
     piston: np.ndarray
     coeffs: np.ndarray | None = None
-    eta: np.ndarray | None = None
+    carrier: np.ndarray | None = None
     alpha: np.ndarray | None = None
     g: np.ndarray | None = None
     noise: NoiseModel | None = None
@@ -72,10 +73,27 @@ class Scene:
                             beam_intensity(self.I2_map, alpha),
                             coherence(self.gamma_map, g))
         coeffs = xp.zeros((0, N)) if self.coeffs is None else self.coeffs
-        carrier = xp.zeros((1, H, W)) if self.eta is None else \
-            carrier_map(H, W, self.eta, device="cpu" if xp is np else "cuda")
-        psi = total_phase(self.phi, carrier, step_field(H, W, self.piston, coeffs))
+        psi = total_phase(self.phi, self._carrier_map(xp, H, W),
+                          step_field(H, W, self.piston, coeffs))
         return simulate(a, b, psi)
+
+    def _carrier_map(self, xp: ModuleType, H: int, W: int) -> np.ndarray:
+        """Carrier as a ``(1, H, W)`` map, from coefficients if given as 1-D.
+
+        Raises
+        ------
+        ValueError
+            If ``carrier`` is neither 1-D nor 3-D.
+        """
+        if self.carrier is None:
+            return xp.zeros((1, H, W))
+        ndim = np.ndim(self.carrier)
+        if ndim == 1:
+            return carrier_map(H, W, self.carrier, device="cpu" if xp is np else "cuda")
+        if ndim == 3:
+            return self.carrier
+        raise ValueError(f"carrier must be coefficients (L,) or a map (1, H, W), "
+                         f"got {ndim}-D")
 
     def ideal(self) -> np.ndarray:
         """Noise-free stack.
