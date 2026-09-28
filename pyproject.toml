@@ -15,7 +15,7 @@ dependencies = [
 [project.optional-dependencies]
 # Optional GPU backend; retained from holoeml-processing. Choose a CUDA
 # wheel compatible with your GPU and driver. CPU use requires no CuPy.
-cuda = ["cupy-cuda12x>=13.0,<15"]
+cuda = ["cupy-cuda12x[ctk]>=13.0,<15"]
 # Notebook kernel and plotting for running scripts/*.ipynb in an IDE.
 jupyter = ["ipykernel>=6", "matplotlib>=3.8"]
 
@@ -38,3 +38,4 @@ include = ["src/phase_shift", "src/simulator", "tests", "docs", "examples", "REA
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib"
+markers = ["gpu: compares device='cuda' against device='cpu'; skipped without CuPy"]

@@ -35,8 +35,10 @@ environment management and Python commands; setup: `uv sync --locked`.
 
 - Run relevant local tests for small changes; run `uv run pytest` for significant
   changes. Add or update tests as needed to validate changed behavior.
-- Development usually happens on a Mac; do not run GPU tests there. Real GPU and
-  measurement validation happens later on the NVIDIA Quadro 2200 machine.
+- Development usually happens on a Mac, where CuPy is not installed and the
+  `gpu`-marked tests skip. Real GPU and measurement validation happens on the
+  Windows workstation with two NVIDIA Quadro RTX 4000 GPUs (CuPy with pip CUDA
+  12.9, `uv sync --locked --extra cuda`); run `uv run pytest -m gpu` there.
   Report what was tested and what still requires that machine.
 
 Keep this file compact and repository-wide; place specialized rules in folder

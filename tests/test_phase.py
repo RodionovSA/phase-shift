@@ -18,7 +18,7 @@ from phase_shift import (
     subtract_reference,
 )
 from phase_shift import METHODS
-from phase_shift.backend import CUPY_AVAILABLE, Precision, get_precision, set_precision
+from phase_shift.backend import Precision, get_precision, set_precision, weighted_gram
 from phase_shift.basis import BASES, spatial_basis
 from phase_shift.methods import MethodParam
 from phase_shift.methods.gauge import (center_offsets, normalize_gain,
@@ -131,6 +131,19 @@ class TestPrecision:
         assert r.phi.dtype == np.float64
 
 
+class TestWeightedGram:
+    @pytest.mark.parametrize("dtype", [np.float64, np.float32])
+    @pytest.mark.parametrize("M,K", [(4, 3), (5, 5), (0, 3), (4, 0)])
+    def test_matches_weighted_product(self, dtype, M, K):
+        rng = np.random.default_rng(0)
+        A = rng.standard_normal((M, 1000)).astype(dtype)
+        w = rng.standard_normal(1000).astype(dtype)
+        B = rng.standard_normal((K, 1000)).astype(dtype)
+        G = weighted_gram(A, w, B)
+        assert G.shape == (M, K) and G.dtype == dtype
+        np.testing.assert_array_equal(G, (A * w) @ B.T)
+
+
 class TestAIA:
     def test_recovers_known_phase(self):
         stack, truth = make_stack()
@@ -236,8 +249,6 @@ class TestAIA:
         assert all(costs[i + 1] <= costs[i] + 1e-9 for i in range(len(costs) - 1))
 
     def test_device_cuda_without_cupy_raises(self):
-        if CUPY_AVAILABLE:
-            pytest.skip("cupy is installed in this environment")
         stack, _ = make_stack(H=8, W=8, N=6)
         with pytest.raises(RuntimeError):
             PhaseSolver(PhaseConfig(), device="cuda").fit(stack)

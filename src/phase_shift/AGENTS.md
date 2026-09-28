@@ -100,4 +100,7 @@ Rules for the `phase_shift` package. The root `AGENTS.md` still applies.
 - Fast synthetic tests in `tests/`; never depend on files in `data/`.
 - Seed every RNG, compare against known ground truth with wrap-aware errors and
   explicit tolerances.
-- Guard GPU-specific checks with `CUPY_AVAILABLE` so they skip on the Mac.
+- Tests run on NumPy even when CuPy is installed (`tests/conftest.py`). Put
+  GPU checks in `tests/test_gpu.py`, marked `gpu`, comparing `device="cuda"`
+  against `device="cpu"`; they skip without CuPy. Run them alone with
+  `uv run pytest -m gpu`.

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..backend import Precision, get_array_module
+from ..backend import Precision, get_array_module, weighted_gram
 from .diagnostics import cond2
 
 
@@ -124,15 +124,13 @@ def _pixel_sums(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.ndarray,
         uuH += (H_c @ uu_c).astype(xp.float64)
         vvH += (H_c @ vv_c).astype(xp.float64)
         uvH += (H_c @ uv_c).astype(xp.float64)
-        # (H_c * w) @ H_c.T, never H_c[:, None] * H_c[None]: the latter is a
-        # (J, J, C) temporary.
-        uuHH += ((H_c * uu_c) @ H_c.T).astype(xp.float64)
-        vvHH += ((H_c * vv_c) @ H_c.T).astype(xp.float64)
-        uvHH += ((H_c * uv_c) @ H_c.T).astype(xp.float64)
+        uuHH += weighted_gram(H_c, uu_c, H_c).astype(xp.float64)
+        vvHH += weighted_gram(H_c, vv_c, H_c).astype(xp.float64)
+        uvHH += weighted_gram(H_c, uv_c, H_c).astype(xp.float64)
         bu += (r_c @ u_c).astype(xp.float64)
         bv += (r_c @ v_c).astype(xp.float64)
-        ruH += ((r_c * u_c[None, :]) @ H_c.T).astype(xp.float64)
-        rvH += ((r_c * v_c[None, :]) @ H_c.T).astype(xp.float64)
+        ruH += weighted_gram(r_c, u_c, H_c).astype(xp.float64)
+        rvH += weighted_gram(r_c, v_c, H_c).astype(xp.float64)
 
     return Suu, Svv, Suv, uuH, vvH, uvH, uuHH, vvHH, uvHH, bu, bv, ruH, rvH
 

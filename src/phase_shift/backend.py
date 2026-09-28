@@ -34,6 +34,33 @@ def get_array_module(*arrays: np.ndarray) -> ModuleType:
     return np
 
 
+def weighted_gram(A: np.ndarray, w: np.ndarray, B: np.ndarray) -> np.ndarray:
+    """Weighted sum over the last axis, ``sum_c A[i, c] w[c] B[k, c]``.
+
+    Equal to ``(A * w) @ B.T``. On CuPy in float64 each column of the result
+    is a separate reduction rather than one matrix product.
+
+    Parameters
+    ----------
+    A : np.ndarray, shape (M, C)
+    w : np.ndarray, shape (C,)
+    B : np.ndarray, shape (K, C)
+
+    Returns
+    -------
+    np.ndarray, shape (M, K)
+        In the dtype of ``A * w * B``, on the arrays' device.
+    """
+    xp = get_array_module(A, w, B)
+    dtype = xp.result_type(A, w, B)
+    if xp is np or dtype != np.float64:
+        return (A * w) @ B.T
+    out = xp.empty((A.shape[0], B.shape[0]), dtype=dtype)
+    for k in range(B.shape[0]):
+        out[:, k] = (A * (w * B[k])).sum(axis=1)
+    return out
+
+
 def to_device(x: ArrayLike, device: str = "auto", dtype: DTypeLike = None) -> np.ndarray:
     """Move ``x`` to the requested device.
 

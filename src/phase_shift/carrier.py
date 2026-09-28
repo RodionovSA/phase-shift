@@ -7,7 +7,7 @@ from types import ModuleType
 
 import numpy as np
 
-from .backend import Precision, asnumpy, get_array_module, to_device
+from .backend import Precision, asnumpy, get_array_module, to_device, weighted_gram
 from .basis import spatial_basis
 from .utils import _estimation_weight, wrap
 
@@ -97,7 +97,7 @@ def _start(zeta: np.ndarray, P: np.ndarray, window: int) -> np.ndarray:
         P_x = (P[1:, :, 1:] - P[1:, :, :-1]).reshape(L1 - 1, -1)
         P_y = (P[1:, 1:, :] - P[1:, :-1, :]).reshape(L1 - 1, -1)
         w_x, w_y = xp.abs(c_x).ravel(), xp.abs(c_y).ravel()
-        G = (P_x * w_x) @ P_x.T + (P_y * w_y) @ P_y.T
+        G = weighted_gram(P_x, w_x, P_x) + weighted_gram(P_y, w_y, P_y)
         r = P_x @ (w_x * xp.angle(c_x).ravel()) + P_y @ (w_y * xp.angle(c_y).ravel())
         eta[1:] = np.linalg.solve(asnumpy(G), asnumpy(r))
     psi = xp.asarray(eta, dtype=P.dtype) @ P.reshape(L1, -1)
@@ -130,7 +130,7 @@ def _newton(zeta: np.ndarray, P: np.ndarray, eta: np.ndarray,
     for n_iter in range(1, max_iter + 1):
         d = z_f * xp.exp(-1j * (xp.asarray(eta, dtype=P.dtype) @ P_f))      # omega e^{i chi}
         h = asnumpy(P_f @ d.imag)
-        S = asnumpy((P_f * d.real) @ P_f.T)
+        S = asnumpy(weighted_gram(P_f, d.real, P_f))
         step = np.linalg.solve(S, h)
         eta = eta + step
         if np.abs(step).max() < tol:
