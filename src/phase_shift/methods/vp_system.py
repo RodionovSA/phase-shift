@@ -151,7 +151,7 @@ def fit_frame_and_coeffs(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.
     stack : np.ndarray, shape (N, P)
         Interferogram frames flattened to ``P = H*W`` pixels each.
     a, u, v : np.ndarray, shape (P,)
-        Zeroth-order background and quadrature fields. They must come from a
+        AIA-baseline background and quadrature fields. They must come from a
         pixel step at ``(P_n, Q_n)`` (:func:`phase_shift.methods.steps.pixel_step`)
         and be normalized by
         :func:`phase_shift.methods.gauge.normalize_quadrature_frame`, as
@@ -160,7 +160,7 @@ def fit_frame_and_coeffs(stack: np.ndarray, a: np.ndarray, u: np.ndarray, v: np.
         residual; fields that merely fit the data well do not satisfy it, and
         the coefficients come out wrong rather than merely noisy.
     P_n, Q_n : np.ndarray, shape (N,)
-        Zeroth-order per-frame coefficients, ``docs/vp_aia.md`` Eq. (3).
+        AIA-baseline per-frame coefficients, ``docs/vp_aia.md`` Eq. (3).
     basis : np.ndarray, shape (J, P)
         Spatial modes ``H_j`` of Eq. (6), e.g. from
         :func:`phase_shift.basis.spatial_basis`.

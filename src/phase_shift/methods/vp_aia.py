@@ -121,9 +121,9 @@ def _pixel_corrections(alpha: np.ndarray, u: np.ndarray, v: np.ndarray,
     alpha : np.ndarray, shape (N, J)
         Fitted mode coefficients.
     u, v : np.ndarray, shape (P,)
-        Zeroth-order quadrature fields.
+        AIA-baseline quadrature fields.
     P_n, Q_n : np.ndarray, shape (N,)
-        Zeroth-order per-frame coefficients.
+        AIA-baseline per-frame coefficients.
     basis : np.ndarray, shape (J, P)
         Spatial modes ``H_j``.
     acc : dtype

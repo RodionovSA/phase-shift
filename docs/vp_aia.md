@@ -43,11 +43,11 @@ where $\mathbf i=(I_1,\dots,I_N)^\top$ and $A$ has rows $(1,\hat P_n,\hat Q_n)$.
 
 ## First-order corrections
 
-For small $|\Delta_n|$, each AIA estimate is the exact parameter plus a bias ordered by powers of $\Delta_n$ (Appendix B):
+For small $|\Delta_n|$, each true parameter is the AIA estimate plus corrections ordered by powers of $\Delta_n$ (Appendix B):
 
-$$\hat f=f^{(0)}+f^{(1)}+O(\Delta_n^2),\qquad f^{(k)}=O(\Delta_n^k),\qquad f\in\{a,u,v,P_n,Q_n\}.\tag{5}$$
+$$f=\hat f+f^{(1)}+O(\Delta_n^2),\qquad f^{(k)}=O(\Delta_n^k),\qquad f\in\{a,u,v,P_n,Q_n\}.\tag{5}$$
 
-$f^{(0)}$ is the exact parameter the method must recover, and $f^{(1)}$ the bias the fit absorbed. The biases $a^{(1)},u^{(1)},v^{(1)}$ are fields shared by all frames; $P_n^{(1)},Q_n^{(1)}$ are scalars shared by all pixels. $\Delta_n$ itself is first order throughout.
+$f$ is the true parameter the method must recover, $\hat f$ the known expansion point, and $f^{(1)}$ the first-order correction. The corrections $a^{(1)},u^{(1)},v^{(1)}$ are fields shared by all frames; $P_n^{(1)},Q_n^{(1)}$ are scalars shared by all pixels. $\Delta_n$ itself is first order throughout.
 
 ### Spatial modes
 
@@ -69,11 +69,11 @@ With the baseline residual
 
 $$r_n=I_n-\big(\hat a+\hat P_n\hat u+\hat Q_n\hat v\big),\tag{8}$$
 
-substituting Eqs. (5) and (6) into Eq. (1) and keeping first-order terms gives, up to noise (Appendix B),
+expanding Eq. (1) about the AIA estimates and $\Delta_n=0$ with Eqs. (5) and (6) and keeping first-order terms gives, up to noise (Appendix B),
 
-$$r_n=w_n\sum_{j=1}^J\alpha_{nj}H_j-\big(a^{(1)}+\hat P_nu^{(1)}+\hat Q_nv^{(1)}\big)-\hat uP_n^{(1)}-\hat vQ_n^{(1)},\qquad w_n=\hat P_n\hat v-\hat Q_n\hat u.\tag{9}$$
+$$r_n=w_n\sum_{j=1}^J\alpha_{nj}H_j+\big(a^{(1)}+\hat P_nu^{(1)}+\hat Q_nv^{(1)}\big)+\hat uP_n^{(1)}+\hat vQ_n^{(1)},\qquad w_n=\hat P_n\hat v-\hat Q_n\hat u.\tag{9}$$
 
-The step-error signal enters with a plus sign and every absorbed bias with a minus: what the fit took out of the data is missing from the residual. $w_n$ is the first-order sensitivity to $\Delta_n$ evaluated at the AIA estimates; using the true parameters instead changes Eq. (9) only at second order.
+$w_n$ is the sensitivity of the intensity to $\Delta_n$ at the expansion point.
 
 ### Removing the pixel corrections
 
@@ -81,11 +81,11 @@ At one pixel, define the $N\times N$ residual-maker of the pixel step (Hoaglin a
 
 $$\Pi=I-AA_p^{-1}A^\top.\tag{10}$$
 
-By Eq. (4), $\Pi\mathbf i=(r_1,\dots,r_N)^\top$. $\Pi$ depends only on $\hat P_n,\hat Q_n$, is the same at every pixel, and satisfies $\Pi A=0$, $\Pi^2=\Pi$, $\Pi^\top=\Pi$; it has rank $N-3$. The pixel-side bias of Eq. (9) is a column $A\big(a^{(1)},u^{(1)},v^{(1)}\big)^\top$, which $\Pi$ removes, while $\Pi$ leaves the residual unchanged. Applying $\Pi$ to Eq. (9) gives
+By Eq. (4), $\Pi\mathbf i=(r_1,\dots,r_N)^\top$. $\Pi$ depends only on $\hat P_n,\hat Q_n$, is the same at every pixel, and satisfies $\Pi A=0$, $\Pi^2=\Pi$, $\Pi^\top=\Pi$; it has rank $N-3$. The pixel-side correction of Eq. (9) is a column $A\big(a^{(1)},u^{(1)},v^{(1)}\big)^\top$, which $\Pi$ removes, while $\Pi$ leaves the residual unchanged. Applying $\Pi$ to Eq. (9) gives
 
 $$\begin{pmatrix}r_1\\\vdots\\r_N\end{pmatrix}
 =\Pi\begin{pmatrix}z_1\\\vdots\\z_N\end{pmatrix},\qquad
-z_n=w_n\sum_j\alpha_{nj}H_j-\hat uP_n^{(1)}-\hat vQ_n^{(1)}.\tag{11}$$
+z_n=w_n\sum_j\alpha_{nj}H_j+\hat uP_n^{(1)}+\hat vQ_n^{(1)}.\tag{11}$$
 
 Eq. (11) holds at every pixel and contains only the $2N+NJ$ unknowns $P_n^{(1)},Q_n^{(1)},\alpha_{nj}$, all shared by the pixels. Eliminating a group of regressors by applying the residual-maker to the data and the remaining regressors does not change the least-squares estimates of the rest (Frisch and Waugh, 1933; Lovell, 1963), so a fit of Eq. (11) gives the same unknowns as a joint fit of Eq. (9).
 
@@ -118,13 +118,13 @@ when the matrix is invertible, which requires $N\ge5$ and $J\le J_{\max}$. The s
 With $\tilde\alpha_{nj}$ from Eq. (15) and $\tilde\Delta_n=\sum_j\tilde\alpha_{nj}H_j$, Eq. (9) at one pixel is a pixel step for $a^{(1)},u^{(1)},v^{(1)}$. The residual and, by Eq. (14), the frame corrections are removed by $A^\top$, so only the step-error term remains:
 
 $$\begin{pmatrix}a^{(1)}\\u^{(1)}\\v^{(1)}\end{pmatrix}
-=A_p^{-1}\begin{pmatrix}\sum_nw_n\tilde\Delta_n\\\sum_n\hat P_nw_n\tilde\Delta_n\\\sum_n\hat Q_nw_n\tilde\Delta_n\end{pmatrix}.\tag{16}$$
+=-A_p^{-1}\begin{pmatrix}\sum_nw_n\tilde\Delta_n\\\sum_n\hat P_nw_n\tilde\Delta_n\\\sum_n\hat Q_nw_n\tilde\Delta_n\end{pmatrix}.\tag{16}$$
 
-By the Frisch–Waugh–Lovell theorem, Eqs. (15) and (16) together are the joint least-squares solution of Eq. (9). Subtracting the biases gives the corrected estimates
+By the Frisch–Waugh–Lovell theorem, Eqs. (15) and (16) together are the joint least-squares solution of Eq. (9). Adding the corrections gives the corrected estimates
 
-$$\tilde a=\hat a-a^{(1)},\qquad \tilde u=\hat u-u^{(1)},\qquad \tilde v=\hat v-v^{(1)},\qquad \tilde P_n=\hat P_n-P_n^{(1)},\qquad \tilde Q_n=\hat Q_n-Q_n^{(1)},\tag{17}$$
+$$\tilde a=\hat a+a^{(1)},\qquad \tilde u=\hat u+u^{(1)},\qquad \tilde v=\hat v+v^{(1)},\qquad \tilde P_n=\hat P_n+P_n^{(1)},\qquad \tilde Q_n=\hat Q_n+Q_n^{(1)},\tag{17}$$
 
-each equal to $f^{(0)}$ up to $O(\Delta_n^2)$. They satisfy Eq. (14) rather than the conventions, from which they deviate only at first order; the normalization of Appendix D restores the conventions, leaves $\tilde\Delta_n$ unchanged, and changes the intensities only at second order. The final estimates are $\tilde\delta_n=\operatorname{atan2}(\tilde Q_n,\tilde P_n)$, $\tilde g_n=\sqrt{\tilde P_n^2+\tilde Q_n^2}$, $\tilde b=\sqrt{\tilde u^2+\tilde v^2}$, $\tilde\Phi=\operatorname{atan2}(-\tilde v,\tilde u)$, and $\tilde\Delta_n$, with errors of second order in $\Delta_n$.
+each equal to the true parameter $f$ up to $O(\Delta_n^2)$. They satisfy Eq. (14) rather than the conventions, from which they deviate only at first order; the normalization of Appendix D restores the conventions, leaves $\tilde\Delta_n$ unchanged, and changes the intensities only at second order. The final estimates are $\tilde\delta_n=\operatorname{atan2}(\tilde Q_n,\tilde P_n)$, $\tilde g_n=\sqrt{\tilde P_n^2+\tilde Q_n^2}$, $\tilde b=\sqrt{\tilde u^2+\tilde v^2}$, $\tilde\Phi=\operatorname{atan2}(-\tilde v,\tilde u)$, and $\tilde\Delta_n$, with errors of second order in $\Delta_n$.
 
 ### VP-AIA algorithm and cost
 
@@ -176,7 +176,7 @@ For $N$ frames and $K$ pixels, Eq. (1) has $3K+2N+NK$ unknowns: $a,b,\Phi$ at ev
 
 $$(3K+2N+NK)-NK-(N+K-1)-2=2K+N-1\tag{A1}$$
 
-degrees of freedom remain, so an unrestricted $\Delta_n$ cannot be recovered. The same count holds for the first-order unknowns, $3K$ pixel biases, $2N$ frame biases, and $NK$ values of $\Delta_n$; the four quadrature-frame conditions remove four more, leaving at least $2K+N-5$.
+degrees of freedom remain, so an unrestricted $\Delta_n$ cannot be recovered. The same count holds for the first-order unknowns, $3K$ pixel corrections, $2N$ frame corrections, and $NK$ values of $\Delta_n$; the four quadrature-frame conditions remove four more, leaving at least $2K+N-5$.
 
 With Eq. (6), the unknowns are $3K+2N+NJ$. With the $NK$ equations, the $J$ coefficient-mean constraints, and the six conditions of phase origin, contrast scale, and quadrature frame,
 
@@ -198,26 +198,28 @@ $$I_n=a+P_nu+Q_nv+\sum_{k=1}^{\infty}\kappa_{n,k}\Delta_n^k,\qquad
 \dfrac{(-1)^{k/2}}{k!}\big(P_nu+Q_nv\big), & k\text{ even},
 \end{cases}\tag{B2}$$
 
-since $g_nb\cos\theta_n=P_nu+Q_nv$ and $-g_nb\sin\theta_n=P_nv-Q_nu$. The zeroth order is the piston model, Eq. (3); the rest, $e_n=\sum_{k\ge1}\kappa_{n,k}\Delta_n^k$, is what the piston model cannot represent.
+since $g_nb\cos\theta_n=P_nu+Q_nv$ and $-g_nb\sin\theta_n=P_nv-Q_nu$. The zeroth order is the piston model, Eq. (3); the rest, $e_n=\sum_{k\ge1}\kappa_{n,k}\Delta_n^k$, is what the piston model cannot represent. Summed, the series gives the exact form
+
+$$I_n=a+\big(P_nu+Q_nv\big)\cos\Delta_n+\big(P_nv-Q_nu\big)\sin\Delta_n.\tag{B3}$$
 
 **Bias of the pixel step.** With the frame-parameter errors $\varepsilon_{P_n}=\hat P_n-P_n$ and $\varepsilon_{Q_n}=\hat Q_n-Q_n$, the data are $I_n=a+\hat P_nu+\hat Q_nv+s_n$ with $s_n=e_n-\varepsilon_{P_n}u-\varepsilon_{Q_n}v$, and Eq. (4) gives
 
-$$\begin{pmatrix}\hat a\\\hat u\\\hat v\end{pmatrix}=\begin{pmatrix}a\\u\\v\end{pmatrix}+A_p^{-1}A^\top\begin{pmatrix}s_1\\\vdots\\s_N\end{pmatrix}.\tag{B3}$$
+$$\begin{pmatrix}\hat a\\\hat u\\\hat v\end{pmatrix}=\begin{pmatrix}a\\u\\v\end{pmatrix}+A_p^{-1}A^\top\begin{pmatrix}s_1\\\vdots\\s_N\end{pmatrix}.\tag{B4}$$
 
 The pixel fields are biased by the projection of $s_n$ onto the regressors: the leakage of the step-error intensity $e_n$, and the frame-parameter errors that the frame step produces. If the frame parameters carry no bias, the pixel step takes the part of $e$ in the column space of $A$, and the residual keeps only $\Pi e$; fitting the residual with $e_n$ itself would therefore underestimate $\Delta_n$, which is why Eq. (11) compares the residual with the leftover of the signal.
 
-**Ordering.** Only the estimates depend on $\Delta_n$; the true parameters have no expansion. To give orders a meaning, scale a fixed shape, $\Delta_n=\epsilon D_n$, so that each estimate is a function of the scalar $\epsilon$. At $\epsilon=0$ the piston model describes the data exactly and the conventions leave one solution, so a noiseless fit returns the exact parameters. The estimates solve AIA's normal equations with the normalization conditions, which determine them uniquely at $\epsilon=0$, so they depend analytically on $\epsilon$ near it, which gives Eq. (5).
+**Ordering.** Only the estimates depend on $\Delta_n$; the true parameters have no expansion. To give orders a meaning, scale a fixed shape, $\Delta_n=\epsilon D_n$, so that each estimate is a function of the scalar $\epsilon$. At $\epsilon=0$ the piston model describes the data exactly and the conventions leave one solution, so a noiseless fit returns the exact parameters. The estimates solve AIA's normal equations with the normalization conditions, which determine them uniquely at $\epsilon=0$, so they depend analytically on $\epsilon$ near it. The differences $f-\hat f$ therefore vanish at $\epsilon=0$ and expand in powers of $\epsilon$, which gives Eq. (5).
 
-**First-order residual.** Substituting Eq. (5) into $r_n=I_n-\big(\hat a+\hat P_n\hat u+\hat Q_n\hat v\big)$ with Eq. (B2) and keeping first-order terms gives Eq. (9). The sensitivity $\kappa_{n,1}=P_nv-Q_nu$ multiplies the first-order $\Delta_n$, so evaluating it at the AIA estimates, as $w_n$, costs $O(\Delta_n^2)$.
+**First-order residual.** Eq. (B3) is written in the true parameters. Substituting $f=\hat f+f^{(1)}+O(\Delta_n^2)$ from Eq. (5) expands it about the AIA estimates: each product splits as $P_nu=\hat P_n\hat u+\hat P_nu^{(1)}+\hat uP_n^{(1)}+O(\Delta_n^2)$, and $\cos\Delta_n=1+O(\Delta_n^2)$, $\sin\Delta_n=\Delta_n+O(\Delta_n^3)$. Subtracting the fit $\hat a+\hat P_n\hat u+\hat Q_n\hat v$ and keeping first-order terms gives Eq. (9); the coefficient of $\Delta_n$ is $\hat P_n\hat v-\hat Q_n\hat u=w_n$.
 
 ## Appendix C. Normal equations
 
 In this appendix $u,v,P_n,Q_n$ denote the baseline estimates, hats suppressed, and $z_n$ is the column of Eq. (11). Setting the derivatives of Eq. (12) with respect to $P_n^{(1)}$, $Q_n^{(1)}$, and $\alpha_{nj}$ to zero gives, for $n=1,\dots,N$ and $j=1,\dots,J$,
 
 $$\begin{aligned}
-\sum_m\Pi_{nm}\Big[P_m^{(1)}\sum_{x,y}u^2+Q_m^{(1)}\sum_{x,y}uv-\sum_{j'}\alpha_{mj'}\sum_{x,y}uw_mH_{j'}\Big]&=-\sum_{x,y}ur_n,\\
-\sum_m\Pi_{nm}\Big[P_m^{(1)}\sum_{x,y}uv+Q_m^{(1)}\sum_{x,y}v^2-\sum_{j'}\alpha_{mj'}\sum_{x,y}vw_mH_{j'}\Big]&=-\sum_{x,y}vr_n,\\
-\sum_m\Pi_{nm}\Big[-P_m^{(1)}\sum_{x,y}uw_nH_j-Q_m^{(1)}\sum_{x,y}vw_nH_j+\sum_{j'}\alpha_{mj'}\sum_{x,y}w_nw_mH_jH_{j'}\Big]&=\sum_{x,y}w_nH_jr_n.
+\sum_m\Pi_{nm}\Big[P_m^{(1)}\sum_{x,y}u^2+Q_m^{(1)}\sum_{x,y}uv+\sum_{j'}\alpha_{mj'}\sum_{x,y}uw_mH_{j'}\Big]&=\sum_{x,y}ur_n,\\
+\sum_m\Pi_{nm}\Big[P_m^{(1)}\sum_{x,y}uv+Q_m^{(1)}\sum_{x,y}v^2+\sum_{j'}\alpha_{mj'}\sum_{x,y}vw_mH_{j'}\Big]&=\sum_{x,y}vr_n,\\
+\sum_m\Pi_{nm}\Big[P_m^{(1)}\sum_{x,y}uw_nH_j+Q_m^{(1)}\sum_{x,y}vw_nH_j+\sum_{j'}\alpha_{mj'}\sum_{x,y}w_nw_mH_jH_{j'}\Big]&=\sum_{x,y}w_nH_jr_n.
 \end{aligned}\tag{C1}$$
 
 Since $w_n=P_nv-Q_nu$, every pixel sum containing $w_n$ reduces to sums without a frame index:
@@ -232,12 +234,12 @@ $$\begin{aligned}
 The matrix therefore needs three scalar sums, three sums per mode, and three per pair of modes; the right-hand sides need four sums per frame and mode, all in one pass. Under whitening, $\sum_{x,y}uv=0$ and $\sum_{x,y}u^2=\sum_{x,y}v^2$. In block form, Eq. (13) has
 
 $$M=\begin{pmatrix}
-\Pi\sum_{x,y}u^2&\Pi\sum_{x,y}uv&-D_u\\
-\Pi\sum_{x,y}uv&\Pi\sum_{x,y}v^2&-D_v\\
--D_u^\top&-D_v^\top&E
+\Pi\sum_{x,y}u^2&\Pi\sum_{x,y}uv&D_u\\
+\Pi\sum_{x,y}uv&\Pi\sum_{x,y}v^2&D_v\\
+D_u^\top&D_v^\top&E
 \end{pmatrix},$$
 
-$$\rho=\Big(-\sum_{x,y}ur_1,\dots,-\sum_{x,y}ur_N,\ -\sum_{x,y}vr_1,\dots,-\sum_{x,y}vr_N,\ \sum_{x,y}w_1H_1r_1,\dots,\sum_{x,y}w_NH_Jr_N\Big)^\top,$$
+$$\rho=\Big(\sum_{x,y}ur_1,\dots,\sum_{x,y}ur_N,\ \sum_{x,y}vr_1,\dots,\sum_{x,y}vr_N,\ \sum_{x,y}w_1H_1r_1,\dots,\sum_{x,y}w_NH_Jr_N\Big)^\top,$$
 
 where $\Pi\sum_{x,y}u^2$ is $\Pi$ times a scalar. The coupling and coefficient blocks are
 
