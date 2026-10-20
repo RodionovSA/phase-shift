@@ -107,7 +107,8 @@ def _start(zeta: np.ndarray, P: np.ndarray, window: int) -> np.ndarray:
 
 def _newton(zeta: np.ndarray, P: np.ndarray, eta: np.ndarray,
             max_iter: int) -> tuple[np.ndarray, int, float, bool]:
-    """Newton steps of ``docs/carrier_removal.md`` Eqs. (5)-(7).
+    """Newton steps of ``docs/carrier_removal.md`` Eqs. (5)-(7), safeguarded as
+    in §"Safeguarded step".
 
     Stops when no coefficient moves by more than the square root of the
     basis dtype's resolution.
@@ -126,17 +127,28 @@ def _newton(zeta: np.ndarray, P: np.ndarray, eta: np.ndarray,
     P_f = P.reshape(P.shape[0], -1)                                          # (L+1, h*w)
     z_f = zeta.ravel()
     tol = float(np.sqrt(np.finfo(P.dtype).eps))
+    G = asnumpy(weighted_gram(P_f, xp.abs(z_f), P_f))
+
+    def residual(eta: np.ndarray) -> tuple[np.ndarray, float]:
+        d = z_f * xp.exp(-1j * (xp.asarray(eta, dtype=P.dtype) @ P_f))      # omega e^{i chi}
+        return d, float(d.real.sum(dtype=np.float64))                       # F, Eq. (3)
+
+    d, F = residual(eta)
     converged = False
     for n_iter in range(1, max_iter + 1):
-        d = z_f * xp.exp(-1j * (xp.asarray(eta, dtype=P.dtype) @ P_f))      # omega e^{i chi}
         h = asnumpy(P_f @ d.imag)
         S = asnumpy(weighted_gram(P_f, d.real, P_f))
-        step = np.linalg.solve(S, h)
-        eta = eta + step
+        ev = np.linalg.eigvalsh(S)
+        step = np.linalg.solve(S if ev[0] > 0 else G, h)
+        while True:
+            d_new, F_new = residual(eta + step)
+            if F_new >= F or np.abs(step).max() < tol:
+                break
+            step = step / 2
+        eta, d, F = eta + step, d_new, F_new
         if np.abs(step).max() < tol:
             converged = True
             break
-    ev = np.linalg.eigvalsh(S)
     cond = float(ev[-1] / ev[0]) if ev[0] > 0 else np.inf
     return eta, n_iter, cond, converged
 

@@ -54,7 +54,9 @@ minus the Hessian of $F$, each Newton step updates
 
 $$\boldsymbol\eta\leftarrow\boldsymbol\eta+S^{-1}\mathbf h.\tag{7}$$
 
-$S$ is positive definite only where $\omega\cos\chi>0$ dominates, that is, near the maximum; there it tends to the weighted Gram matrix $\sum_{x,y}\omega\,p_lp_m$, and $\operatorname{cond}(S)$ is the diagnostic of the fit. The corrected phase is $\arg e^{i(\Phi-\Psi)}$.
+$S$ is positive definite only where $\omega\cos\chi>0$ dominates, that is, near the maximum; there it tends to the weighted Gram matrix $G_{lm}=\sum_{x,y}\omega\,p_lp_m$, and $\operatorname{cond}(S)$ is the diagnostic of the fit. The corrected phase is $\arg e^{i(\Phi-\Psi)}$.
+
+**Safeguarded step.** Away from the maximum, pixels where the sample phase departs strongly from the carrier have $\cos\chi<0$, so $S$ can be indefinite even when the start lies in the right basin; Eq. (7) may then lower $F$ and leave the basin. Each step is therefore taken as $\boldsymbol\eta\leftarrow\boldsymbol\eta+t\,\boldsymbol\Delta$, with the direction $\boldsymbol\Delta=S^{-1}\mathbf h$ when $S$ is positive definite and $\boldsymbol\Delta=G^{-1}\mathbf h$ otherwise, and the length $t=1,\tfrac12,\tfrac14,\dots$, the first that does not lower $F$. $G$ is positive definite whenever the weighted pixels are not confined to a zero set of a nonzero carrier, so in both cases $\mathbf h^{\mathsf T}\boldsymbol\Delta>0$ for $\mathbf h\ne0$: $\boldsymbol\Delta$ points uphill, and a short enough step raises $F$. $F$ is bounded by $\sum_{x,y}\omega$, so the iteration cannot run away. The $G$ direction is the wrap-and-refit step of Appendix A with $\sin\chi$ in place of the wrapped $\chi$. Near the maximum $S$ is positive definite and $t=1$ is accepted, so the iteration reduces to Eq. (7) and keeps its fast final convergence. The safeguard leaves the objective and its maxima unchanged; it only keeps each step from lowering $F$.
 
 ## Initialization
 

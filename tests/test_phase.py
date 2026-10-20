@@ -20,6 +20,7 @@ from phase_shift import (
 from phase_shift import METHODS
 from phase_shift.backend import Precision, get_precision, set_precision, weighted_gram
 from phase_shift.basis import BASES, spatial_basis
+from phase_shift.carrier import _carrier_basis, _newton
 from phase_shift.methods import MethodParam
 from phase_shift.methods.gauge import (center_offsets, normalize_gain,
                                        normalize_quadrature_frame, pin_phase_origin,
@@ -330,6 +331,19 @@ class TestCarrier:
         r1 = remove_carrier(phi, w, subsample=1, precision="double")
         r4 = remove_carrier(phi, w, subsample=4, precision="double")
         assert np.abs(wrap(r1.phi - r4.phi)).max() < 1e-8
+
+    def test_newton_climbs_from_indefinite_start(self):
+        # docs/carrier_removal.md §"Safeguarded step": starts where S is
+        # indefinite still reach the maximum.
+        P = _carrier_basis(96, 128, 2, np, Precision.of("double"))
+        eta_true = np.array([0.6, -4.9, 1.3, 5.7, -0.5, 0.9])
+        zeta = np.exp(1j * np.tensordot(eta_true, P, 1))
+        for seed in range(5):
+            eta0 = eta_true + 0.5 * np.random.default_rng(seed).standard_normal(6)
+            eta, _, cond, converged = _newton(zeta, P, eta0, max_iter=40)
+            assert converged and np.isfinite(cond)
+            assert abs(wrap(eta[0] - eta_true[0])) < 1e-8
+            np.testing.assert_allclose(eta[1:], eta_true[1:], atol=1e-8)
 
     def test_degree_zero_removes_piston_only(self):
         phi = np.full((32, 40), 2.5)
