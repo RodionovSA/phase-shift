@@ -12,3 +12,4 @@ htmlcov/
 docs/.obsidian/
 data/
 .claude
+*.npy
