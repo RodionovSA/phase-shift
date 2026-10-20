@@ -26,7 +26,8 @@ from .gauge import (center_offsets, normalize_gain,
 from .step_field import StepFieldParam, step_field_quality
 from .steps import frame_step, pixel_design, pixel_step
 from .vp_aia import VPAIAParam, aia_variable_projection
-from .vp_system import VPSolution, fit_frame_and_coeffs, max_modes
+from .vp_system import (VPSolution, VPSystem, build_system, max_modes, order_rhs,
+                        solve_order)
 
 METHOD_REGISTRY = {
     "aia": aia,
@@ -45,12 +46,15 @@ __all__ = [
     "StepFieldParam",
     "VPAIAParam",
     "VPSolution",
+    "VPSystem",
     "pixel_step",
     "frame_step",
     "pixel_design",
     "step_field_quality",
-    "fit_frame_and_coeffs",
+    "build_system",
     "max_modes",
+    "order_rhs",
+    "solve_order",
     "whiten_uv",
     "whitening_matrix",
     "normalize_quadrature_frame",

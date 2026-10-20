@@ -2,7 +2,7 @@
 """Spatial basis families for the phase-step error field.
 
 The field is expanded as ``Delta_n = sum_j c_jn * p_j``,
-``docs/interference_model.md`` Eq. (9b) and ``docs/vp_aia.md`` Eq. (6), whose
+``docs/interference_model.md`` Eq. (9b) and ``docs/vp_aia.md`` Eq. (2), whose
 modes ``H_j`` these functions are. Every family is centered and orthonormalized
 here, so each basis function has zero spatial mean (Eq. 9a) whatever the
 family.

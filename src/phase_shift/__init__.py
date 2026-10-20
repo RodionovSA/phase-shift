@@ -13,7 +13,7 @@ Public API, re-exported here regardless of which submodule a name lives in:
   blocks the methods share: the least-squares steps, the gauge conventions,
   the accuracy diagnostics, and the spatially varying phase step. Two
   methods are registered: ``"aia"``, and ``"vp_aia"``, which recovers a
-  spatially varying phase-step error as a first-order correction to AIA.
+  spatially varying phase-step error as corrections to AIA, order by order.
 - :mod:`phase_shift.basis` -- ``spatial_basis``, ``BASES``: the basis families
   a phase-step error field is expanded on.
 - :mod:`phase_shift.interference_model` -- ``model_stack``

@@ -2,7 +2,7 @@
 """Phase step ``delta_n + Delta_n(x, y)`` with ``Delta_n`` expanded on spatial modes.
 
 ``Delta_n = sum_j c_jn H_j`` as in ``docs/interference_model.md`` Eq. (9b) and
-``docs/vp_aia.md`` Eq. (6). The modes ``H_j`` are the unit-norm rows of
+``docs/vp_aia.md`` Eq. (2). The modes ``H_j`` are the unit-norm rows of
 :func:`phase_shift.basis.spatial_basis`, so the coefficients ``c`` are in the
 units of VP-AIA's fitted ``coeffs``. Every generator returns coefficients with
 zero frame mean, ``<c_jn>_n = 0``.

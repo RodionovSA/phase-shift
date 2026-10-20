@@ -28,12 +28,12 @@ known.
       *Optics Express* 27(26), 37634-37651, 2019).
     - `vp_aia.py` — Variable-Projection AIA, registered as `"vp_aia"` and
       implemented by `aia_variable_projection`: recovers a spatially varying
-      phase-step error, expanded on a basis, as a first-order correction to
-      the AIA solve in one pass. `rounds > 1` re-linearizes for a step field
-      too large for one pass.
-    - `vp_system.py` — the constrained normal system that fit solves,
-      `fit_frame_and_coeffs`; its size is `2N + NJ` and does not grow with
-      the pixel count.
+      phase-step error, expanded on a basis, as corrections to the AIA solve
+      order by order; `orders` sets how many, `order_tol` stops earlier.
+    - `vp_system.py` — the constrained normal system the orders share:
+      `build_system` forms it once, `order_rhs` accumulates one order's
+      right-hand side in a pass over the stack, `solve_order` solves it. Its
+      size is `2N + NJ` and does not grow with the pixel count.
     - `step_field.py` — `StepFieldParam` and `step_field_quality`, shared by
       any method that expands the step field on a basis.
     - `base.py` — `MethodParam`, the diagnostics interface every method
@@ -46,7 +46,7 @@ known.
       diagnostics it reports.
   - `basis.py` — `spatial_basis`, `BASES`: the spatial basis families a
     phase-step error field is expanded on, each centered and orthonormalized
-    to zero spatial mean, and serving as `docs/vp_aia.md` Eq. (6)'s modes
+    to zero spatial mean, and serving as `docs/vp_aia.md` Eq. (2)'s modes
     `H_j`.
   - `errors.py` — the phase-error derivations of `docs/aia_noise.md` and
     `docs/vp_aia.md` Eq. (19),
@@ -71,7 +71,7 @@ known.
 - `docs/aia_noise.md` — the phase-error covariance of the AIA solution;
   backs `errors.py`.
 - `docs/vp_aia.md` — Variable-Projection AIA, which recovers spatially
-  varying phase-step errors as a first-order correction to AIA; backs
+  varying phase-step errors as corrections to AIA, order by order; backs
   `methods/vp_aia.py` and `methods/vp_system.py`.
 - `docs/gauge_conventions.md` — which convention pins each exact ambiguity
   of the model, and where in the code it is applied.
@@ -142,9 +142,9 @@ acquisition whose result shouldn't be trusted, even if `converged` is
 `VPAIAParam`, built on a `StepFieldParam` base wrapping that `AIAParam`:
 `basis`/`basis_kwargs` naming the family the field was expanded on, `coeffs`
 (shape `(J, N)`, zero frame mean) and `coeffs_rms`, and `kappa_fit` flagging
-a basis that has outrun what the fringe pattern resolves; on top of that, the first-order frame corrections
-`P_corr`/`Q_corr`, the fitted covariance `beta_cov_unit`, `rms_frac`, and
-`rounds_run`/`increment_rms` describing the relinearization. Every method also
+a basis that has outrun what the fringe pattern resolves; on top of that, the frame corrections
+`P_corr`/`Q_corr` summed over the orders, the fitted covariance `beta_cov_unit`, `rms_frac`, and
+`orders_run`/`increment_rms` describing the orders. Every method also
 reports a per-pixel
 `solver.result.phi_error` map in radians, from `docs/aia_noise.md`. See
 `src/phase_shift/config.py`, `src/phase_shift/result.py`,

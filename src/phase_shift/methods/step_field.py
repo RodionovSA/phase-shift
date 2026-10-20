@@ -142,7 +142,7 @@ class StepFieldParam(MethodParam):
         Arguments the basis was built with, e.g. ``{"degree": 2}``.
     coeffs : np.ndarray, shape (J, N)
         Per-frame coefficients ``c_jn``, fit against the fields this result
-        reports, ``docs/vp_aia.md`` Eq. (6).
+        reports, ``docs/vp_aia.md`` Eq. (2).
     coeffs_rms : np.ndarray, shape (J,)
         RMS of each row of ``coeffs`` across frames.
     kappa_fit : float
@@ -175,7 +175,7 @@ class StepFieldParam(MethodParam):
 
         Overrides the piston-only broadcast of
         :meth:`phase_shift.methods.base.MethodParam.phase_step_field` with the
-        spatially varying step, ``docs/vp_aia.md`` Eq. (6). Built in
+        spatially varying step, ``docs/vp_aia.md`` Eq. (2). Built in
         ``precision.accum``, as :func:`step_field_quality` does.
 
         Parameters

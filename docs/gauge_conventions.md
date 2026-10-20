@@ -30,30 +30,32 @@ The step field `Δ_n(x,y) = Σ_j α_nj·H_j(x,y)` is expanded on a basis chosen 
 
 | Freedom | Convention | Where |
 |---|---|---|
-| Spatial split of `δ_n(x,y)` into piston `δ_n` + field `Δ_n(x,y)` | Zero spatial mean per basis function, `⟨H_j⟩ = 0`, so `δ_n` is the field average of the step; the built-in `"poly"` family builds its monomials on coordinates centred at the field centroid and scaled to ≈`[-1,1]`, orthonormalized in ascending degree | `basis.py` (`spatial_basis`); `vp_aia.md` Eq. 6; `interference_model.md` Eq. 9a |
+| Spatial split of `δ_n(x,y)` into piston `δ_n` + field `Δ_n(x,y)` | Zero spatial mean per basis function, `⟨H_j⟩ = 0`, so `δ_n` is the field average of the step; the built-in `"poly"` family builds its monomials on coordinates centred at the field centroid and scaled to ≈`[-1,1]`, orthonormalized in ascending degree | `basis.py` (`spatial_basis`); `vp_aia.md` Eq. 2; `interference_model.md` Eq. 9a |
 
 ## VP-AIA (method `"vp_aia"`)
 
 The `Where` column cites `vp_aia.md`; `methods/gauge.py`
 (`normalize_quadrature_frame`) applies the normalization. VP-AIA fixes the
-phase-step split above, and adds conventions for the four AIA parametrization
-freedoms; the normalization steps
-below are those of Appendix D §"Normalization", applied both to the
-zeroth-order solution and to the corrected fields.
+phase-step split above, and adds conventions for the four freedoms of the
+quadrature frame (`vp_aia.md` Eq. 10); the normalization steps below are those
+of Appendix B §"Normalization", applied to the AIA solution and to the
+estimates after the last order.
 
 | Freedom | Convention | Where |
 |---|---|---|
 | A spatially uniform part of `Δ_n` is indistinguishable from the piston `δ_n` | `⟨Δ_n⟩_{x,y} = 0`, the uniform part assigned to `δ_n` | §"Gauge conventions"; `interference_model.md` Eq. 9a |
-| A pattern shared by all frames is indistinguishable from the static phase `Φ` | `⟨Δ_n(x,y)⟩_n = 0`, the shared pattern assigned to `Φ`; equivalently `⟨α_nj⟩_n = 0` for the mode amplitudes | §"Gauge conventions", Eq. 6; `interference_model.md` Eq. 9b |
+| A pattern shared by all frames is indistinguishable from the static phase `Φ` | `⟨Δ_n(x,y)⟩_n = 0`, the shared pattern assigned to `Φ`; equivalently `⟨α_nj⟩_n = 0` for the mode amplitudes | §"Gauge conventions", Eq. 2; `interference_model.md` Eq. 9b |
 | `(Φ, δ_n) → (Φ−c, δ_n+c)` | `δ_1 = 0`, as a rotation of `(P_n,Q_n)` and `(u,v)` | §"Gauge conventions"; normalization step 3 |
 | `g_n·b` scale | `median(g_n) = 1`, with `s = median_n hypot(P_n,Q_n)` — the same convention as `aia.md` Eq. 16 | §"Gauge conventions"; normalization step 4 |
-| With `g_n` free, `(u,v) → T(u,v)`, `(P_n,Q_n) → T^{-⊤}(P_n,Q_n)` for invertible `T`, plus the shifts `(P_n,Q_n) → (P_n+p, Q_n+q)`, `a → a−pu−qv` | Shifts fixed by the scalar intercept: `Σ(a−ā)u = Σ(a−ā)v = 0`. Shear and anisotropic scaling fixed by whitening `(u,v)` after every pixel step: `Σu² = Σv²`, `Σu·v = 0`. The remaining rotations, reflections, and common scalings follow from `δ_1 = 0`, the step direction, and `⟨g_n⟩_n = 1`. | §"Quadrature frame"; normalization steps 1–2 |
+| With `g_n` free, `(u,v) → T(u,v)`, `(P_n,Q_n) → T^{-⊤}(P_n,Q_n)` for invertible `T`, plus the shifts `(P_n,Q_n) → (P_n+p, Q_n+q)`, `a → a−pu−qv` | Shifts fixed by the scalar intercept: `Σ(a−ā)u = Σ(a−ā)v = 0`. Shear and anisotropic scaling fixed by whitening `(u,v)` after every pixel step: `Σu² = Σv²`, `Σu·v = 0`. The remaining rotations, reflections, and common scalings follow from `δ_1 = 0`, the step direction, and `⟨g_n⟩_n = 1`. | Appendix B §"Quadrature frame"; normalization steps 1–2 |
 
 The shift conditions have no AIA counterpart: `aia.md` §"Identifiability and
 gauge" leaves those two directions unpinned, noting the iteration does not
 drift along them. Fixing them matters here because shifts, shears, and
-anisotropic scalings change the first-order sensitivity `w_n = P_n·v − Q_n·u`
-the phase-step fit is built on.
+anisotropic scalings change the sensitivity `w_n = P_n·v − Q_n·u` the
+phase-step fit is built on. The true parameters generally do not satisfy these
+conventions, which sets the accuracy floor of `vp_aia.md` §"Quadrature frame of
+the expansion point".
 
 ## Carrier removal (`remove_carrier`)
 

@@ -207,14 +207,15 @@ def vp_phi_error(b: np.ndarray, phi: np.ndarray, P_n: np.ndarray, Q_n: np.ndarra
     fitted step field adds, §"Effect on the phase". The second term is the
     quadratic form of Eq. (19) in the coefficient block of the fitted
     covariance; its ``gamma`` is zero at the positions of ``P_n^(1)`` and
-    ``Q_n^(1)``, so only that block is touched.
+    ``Q_n^(1)``, so only that block is touched. It holds for any number of
+    orders, §"Higher orders" of the noise section.
 
     Parameters
     ----------
     b, phi : np.ndarray, shape (H, W)
         Fitted fringe amplitude and phase in radians.
     P_n, Q_n : np.ndarray, shape (N,)
-        Fitted per-frame coefficients, ``docs/vp_aia.md`` Eq. (3).
+        Fitted per-frame coefficients, ``docs/vp_aia.md`` Eq. (4).
     sigma0 : np.ndarray, shape (H, W), or float
         Per-pixel noise standard deviation, ``docs/aia_noise.md`` Eq. (16).
     simplified : bool
@@ -222,7 +223,7 @@ def vp_phi_error(b: np.ndarray, phi: np.ndarray, P_n: np.ndarray, Q_n: np.ndarra
         of Eq. (20).
     beta_cov_unit : np.ndarray, shape (2N+NJ, 2N+NJ)
         Covariance of the fitted unknowns per unit ``sigma_0^2``, from
-        :class:`phase_shift.methods.vp_system.VPSolution`.
+        :class:`phase_shift.methods.vp_system.VPSystem`.
     basis : np.ndarray, shape (J, P)
         The modes ``H_j`` the coefficients were fitted on.
     xp : module
@@ -251,13 +252,13 @@ def vp_phi_error(b: np.ndarray, phi: np.ndarray, P_n: np.ndarray, Q_n: np.ndarra
     Q_n = xp.asarray(Q_n, dtype=xp.float64)
 
     A = xp.stack([xp.ones(N, dtype=xp.float64), P_n, Q_n], axis=1)        # (N, 3)
-    A_p_inv = xp.linalg.pinv(A.T @ A)                                     # (3, 3), Eq. (4)
+    A_p_inv = xp.linalg.pinv(A.T @ A)                                     # (3, 3), Eq. (6)
     e1 = A @ A_p_inv[:, 1]                                                # (N,)
     e2 = A @ A_p_inv[:, 2]
 
     b_a = xp.asarray(b, dtype=acc).reshape(-1)                            # (P,)
     phi_a = xp.asarray(phi, dtype=acc).reshape(-1)
-    u = b_a * xp.cos(phi_a)                                               # (P,), Eq. (2)
+    u = b_a * xp.cos(phi_a)                                               # (P,), Eq. (4)
     v = -b_a * xp.sin(phi_a)
     del b_a, phi_a
     floor = float(xp.finfo(xp.float64).eps)

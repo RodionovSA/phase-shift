@@ -9,9 +9,9 @@
 - `aia_noise.md`: phase-error covariance of the AIA solution, split from
   `aia.md`. Read for noise and error-map work.
 - `vp_aia.md`: Variable-Projection AIA (VP-AIA), the user's own method, which
-  recovers spatially varying phase-step errors as a first-order correction to
-  AIA in one pass. This theory may still be revised through discussion with the
-  user.
+  recovers spatially varying phase-step errors as corrections to AIA, order by
+  order, with one fixed normal system. This theory may still be revised through
+  discussion with the user.
 
 The first two documents are settled foundations. Do not revise their mathematics
 without explicit agreement; discuss proposed VP-AIA changes before updating its

@@ -13,4 +13,4 @@ g: null            # precomputed gain array; overrides gain_mode when set
 
 # Method
 method: vp_aia
-method_kwargs: {"iters": 30, "tol": 1.0e-4, "basis_kwargs": {"degree": 2}, "rounds": 1}
+method_kwargs: {"iters": 30, "tol": 1.0e-4, "basis_kwargs": {"degree": 2}, "orders": 1}
