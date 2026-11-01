@@ -13,3 +13,4 @@ docs/.obsidian/
 data/
 .claude
 *.npy
+*.npz

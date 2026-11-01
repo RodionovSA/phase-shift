@@ -1,0 +1,26 @@
+# Settings for scripts/analysis/extract_phase.py
+
+data:
+  root: "/Users/rodionsa/KAUST Dropbox/Sergei Rodionov/Lab_measurements_shared/HoloEML/20261019_wvl_stack2_500_700_5"
+  wavelengths: null   # list of nm, e.g. [500, 550, 600]; null = every file in root
+  N: 10               # frames per stack used in the fit
+  out: "phi_wvl_stack_vp_n10.npy"   # (wvl, H, W) float32; wavelengths go to <stem>_wvl.npy
+
+# PhaseSolver (see phase_shift.config.PhaseConfig)
+solver:
+  device: auto        # auto, cpu, cuda
+  precision: single   # single, double, fast
+  use_alpha: true
+  gain_mode: joint
+  method: vp_aia
+  method_kwargs: {"iters": 30, "tol": 1.0e-4, "basis": "poly", "basis_kwargs": {"degree": 2},
+                  "orders": 1, "order_tol": 0.0, "crop": 100}
+
+# Fringe-leakage removal after reference subtraction: harmonics of the reference phase fitted on glass
+leakage:
+  enabled: false
+  K: 2                # harmonics cos(k psi), sin(k psi), k = 1..K
+  poly_deg: 1         # polynomial modulation of the ripple amplitude
+  step: 4             # subsampling of the fit
+  mask_thr: 0.05       # glass: |I_s/I_r / median - 1| below this
+  mask_grow: 15       # px kept away from structures

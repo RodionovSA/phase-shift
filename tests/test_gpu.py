@@ -4,7 +4,7 @@
 import numpy as np
 import pytest
 
-from phase_shift import (PhaseConfig, PhaseSolver, asnumpy, combine_acquisitions,
+from phase_shift import (PhaseConfig, PhaseSolver, align_signs, asnumpy, combine_acquisitions,
                          remove_carrier, subtract_reference)
 from phase_shift.backend import get_array_module, to_device, weighted_gram
 from phase_shift.utils import wrap
@@ -79,6 +79,15 @@ def test_subtract_reference_matches_cpu() -> None:
     gpu = subtract_reference(phi, phi_ref, device="cuda")
     assert gpu.sign == cpu.sign == -1
     assert _max_phase_diff(gpu.phi, cpu.phi) < 1e-10
+
+
+def test_align_signs_matches_cpu() -> None:
+    phis = np.stack([s * _fringes(seed=0) for s in (1, -1, -1, 1)])
+    cpu = align_signs(phis, device="cpu")
+    gpu = align_signs(phis, device="cuda")
+    np.testing.assert_array_equal(gpu.signs, cpu.signs)
+    np.testing.assert_array_equal(gpu.signs, [1, -1, -1, 1])
+    assert _max_phase_diff(gpu.phi, cpu.phi) < 1e-12
 
 
 def test_combine_acquisitions_matches_cpu() -> None:

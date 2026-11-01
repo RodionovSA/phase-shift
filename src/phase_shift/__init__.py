@@ -20,7 +20,8 @@ Public API, re-exported here regardless of which submodule a name lives in:
 - :mod:`phase_shift.frame_contrast` -- ``measure_frame_contrast``,
   ``measure_frame_visibility``
 - :mod:`phase_shift.carrier` -- ``remove_carrier``, ``CarrierResult``
-- :mod:`phase_shift.reference` -- ``subtract_reference``, ``DifferenceResult``
+- :mod:`phase_shift.reference` -- ``subtract_reference``, ``DifferenceResult``,
+  ``align_signs``, ``SignAlignment``
 - :mod:`phase_shift.combine` -- ``combine_acquisitions``, ``CombinedResult``
 - :mod:`phase_shift.backend` -- NumPy/CuPy array-module dispatch shared by all
   of the above; every function accepts a ``device="auto"|"cpu"|"cuda"``
@@ -39,7 +40,7 @@ from .config import PhaseConfig
 from .frame_contrast import measure_frame_contrast, measure_frame_visibility
 from .interference_model import model_stack
 from .methods import METHODS, MethodParam
-from .reference import DifferenceResult, subtract_reference
+from .reference import DifferenceResult, SignAlignment, align_signs, subtract_reference
 from .result import PhaseResult
 from .solver import PhaseSolver
 
@@ -58,6 +59,8 @@ __all__ = [
     "remove_carrier",
     "DifferenceResult",
     "subtract_reference",
+    "SignAlignment",
+    "align_signs",
     "CombinedResult",
     "combine_acquisitions",
     "backend",

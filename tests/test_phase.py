@@ -16,6 +16,7 @@ from phase_shift import (
     measure_frame_contrast,
     remove_carrier,
     subtract_reference,
+    align_signs,
 )
 from phase_shift import METHODS
 from phase_shift.backend import Precision, get_precision, set_precision, weighted_gram
@@ -376,6 +377,56 @@ class TestReference:
         # common aberration while phi - phi_ref doubles it -- the chosen
         # (flipped) branch should have much lower spread.
         assert r.spread_flipped < r.spread_same
+
+
+class TestAlignSigns:
+    @staticmethod
+    def scan(L=9, H=48, W=64, seed=5):
+        """Two structures whose phases change with the scan index; the first crosses zero."""
+        Y, X = np.mgrid[0:H, 0:W].astype(np.float64)
+        f1 = np.exp(-((X - 20) ** 2 + (Y - 24) ** 2) / 60)
+        f2 = np.where((X > 40) & (X < 56) & (Y > 10) & (Y < 38), 1.0, 0.0)
+        a1, a2 = np.linspace(1.0, -1.0, L), np.linspace(1.0, 0.6, L)
+        truth = a1[:, None, None] * f1 + a2[:, None, None] * f2
+        rng = np.random.default_rng(seed)
+        signs = rng.choice([-1, 1], L)
+        signs[0] = 1
+        phis = signs[:, None, None] * truth + 0.02 * rng.standard_normal(truth.shape)
+        return phis, truth, signs
+
+    def test_resolves_random_flips_through_zero_crossing(self):
+        phis, truth, signs = self.scan()
+        r = align_signs(phis)
+        np.testing.assert_array_equal(r.signs, signs)
+        assert not r.ambiguous.any()
+        assert circ_rms_deg(r.phi, truth) < 2.0
+
+    def test_skips_ambiguous_map_as_reference(self):
+        phis, truth, signs = self.scan()
+        phis[3] = 0.02 * np.random.default_rng(6).standard_normal(phis.shape[1:])
+        r = align_signs(phis)
+        assert r.ambiguous[3]
+        assert r.reference[4] == 2
+        keep = np.arange(len(phis)) != 3
+        np.testing.assert_array_equal(r.signs[keep], signs[keep])
+
+    def test_weight_and_mask_select_the_comparison(self):
+        phis, truth, signs = self.scan()
+        mask = np.zeros(phis.shape[1:], bool)
+        mask[:, 40:] = True                           # only the structure that never crosses zero
+        r = align_signs(phis, weight=np.ones(phis.shape), mask=mask)
+        np.testing.assert_array_equal(r.signs, signs)
+
+    @pytest.mark.parametrize("kwargs", [dict(ambiguous_ratio=0.5),
+                                        dict(weight=np.ones((5, 5))),
+                                        dict(mask=np.ones((5, 5), bool))])
+    def test_rejects_invalid_arguments(self, kwargs):
+        with pytest.raises(ValueError):
+            align_signs(np.zeros((3, 8, 8)), **kwargs)
+
+    def test_rejects_2d_input(self):
+        with pytest.raises(ValueError):
+            align_signs(np.zeros((8, 8)))
 
 
 class TestCombine:
