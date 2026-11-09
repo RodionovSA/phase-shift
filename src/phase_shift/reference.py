@@ -107,6 +107,7 @@ def subtract_reference(phi: np.ndarray, phi_ref: np.ndarray,
 
     ambiguous = _is_ambiguous(spread_same, spread_flipped, ambiguous_ratio)
     if ambiguous:
+        lo, hi = sorted([spread_same, spread_flipped])
         warnings.warn(
             f"subtract_reference: spread_same={spread_same:.4f} and "
             f"spread_flipped={spread_flipped:.4f} are too close to resolve the "

@@ -378,6 +378,14 @@ class TestReference:
         # (flipped) branch should have much lower spread.
         assert r.spread_flipped < r.spread_same
 
+    def test_warns_on_ambiguous_sign(self):
+        rng = np.random.default_rng(4)
+        phi_ref = 0.02 * rng.standard_normal((48, 48))   # flat reference: both branches alike
+        phi = 0.02 * rng.standard_normal((48, 48))
+        with pytest.warns(UserWarning, match="subtract_reference"):
+            r = subtract_reference(phi, phi_ref)
+        assert r.ambiguous
+
 
 class TestAlignSigns:
     @staticmethod
